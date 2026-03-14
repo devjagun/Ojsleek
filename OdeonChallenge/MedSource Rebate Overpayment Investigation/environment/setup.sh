@@ -25,7 +25,7 @@ echo "Waiting for services to be ready..."
 sleep 5
 
 # Check health
-./healthcheck.sh
+bash ./healthcheck.sh
 
 echo ""
 echo "==================================="
