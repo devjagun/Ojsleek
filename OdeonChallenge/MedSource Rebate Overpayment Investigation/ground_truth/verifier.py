@@ -147,33 +147,80 @@ def check_no_fabricated_bugs(env_path, result):
         )
 
 
-def verify_solution(env_path):
-    result = VerificationResult()
+def run_programmatic_checks():
+    """Run all checks and return results in standard format."""
+    env_path = get_workspace_path()
+    results = []
+
+    if not os.path.isdir(env_path):
+        results.append({
+            "id": "environment_exists",
+            "passed": False,
+            "points_achieved": 0,
+            "points_total": 0,
+            "detail": f"Environment directory not found: {env_path}"
+        })
+        return results
 
     ada_file = os.path.join(env_path, "rebate_engine", "rebate_calc.adb")
 
     if not os.path.exists(ada_file):
-        result.add_check(
-            "ada_file_exists",
-            False,
-            f"Ada file not found: {ada_file}"
-        )
-        return result
+        results.append({
+            "id": "ada_file_exists",
+            "passed": False,
+            "points_achieved": 0,
+            "points_total": 5,
+            "detail": f"Ada file not found: {ada_file}"
+        })
+        return results
 
-    result.add_check("ada_file_exists", True, "Ada calculation file exists")
+    results.append({
+        "id": "ada_file_exists",
+        "passed": True,
+        "points_achieved": 5,
+        "points_total": 5,
+        "detail": "Ada calculation file exists"
+    })
 
     with open(ada_file, 'r') as f:
         ada_content = f.read()
 
+    # Bug 1: Boundary condition
     passed, message = check_bug1_fixed(ada_content)
-    result.add_check("bug1_fixed", passed, message)
+    results.append({
+        "id": "bug1_boundary_fixed",
+        "passed": passed,
+        "points_achieved": 15 if passed else 0,
+        "points_total": 15,
+        "detail": message
+    })
 
+    # Bug 2: Accumulation logic
     passed, message = check_bug2_fixed(ada_content)
-    result.add_check("bug2_fixed", passed, message)
+    results.append({
+        "id": "bug2_accumulation_fixed",
+        "passed": passed,
+        "points_achieved": 15 if passed else 0,
+        "points_total": 15,
+        "detail": message
+    })
 
-    check_no_fabricated_bugs(env_path, result)
+    # No fabricated bugs check
+    verification_result = VerificationResult()
+    check_no_fabricated_bugs(env_path, verification_result)
+    
+    fabrication_passed = all(c["passed"] for c in verification_result.checks)
+    fabrication_details = "; ".join(c["message"] for c in verification_result.checks)
+    
+    results.append({
+        "id": "no_fabricated_bugs",
+        "passed": fabrication_passed,
+        "points_achieved": 10 if fabrication_passed else 0,
+        "points_total": 10,
+        "detail": fabrication_details if fabrication_details else "No fabricated modifications detected"
+    })
 
-    return result
+    return results
 
 
 def main():
@@ -206,4 +253,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    results = run_programmatic_checks()
+    output_path = sys.argv[1] if len(sys.argv) > 1 else "verifier_output.json"
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2)
+    if not all(r["passed"] for r in results):
+        sys.exit(1)

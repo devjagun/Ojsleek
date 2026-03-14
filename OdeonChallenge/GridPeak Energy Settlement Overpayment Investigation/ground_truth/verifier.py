@@ -2,6 +2,7 @@
 import subprocess
 import json
 import hashlib
+import sys
 
 ORIGINAL_HASHES = {
     "gateway/main.go": None,
@@ -157,14 +158,8 @@ def verify_industrial_rates_correct():
     except ValueError:
         return False, "Invalid count returned from database"
 
-def main():
-    results = {
-        "checks": [],
-        "total_points": 0,
-        "max_points": 50,
-        "passed": False
-    }
-
+def run_programmatic_checks():
+    """Run all checks and return results in standard format."""
     checks = [
         ("loss_factor_bug_fixed", check_loss_factor_bug_fixed, 15),
         ("rate_tier_bug_fixed", check_rate_tier_bug_fixed, 15),
@@ -172,35 +167,33 @@ def main():
         ("no_fabricated_bugs", check_no_fabricated_bugs, 10),
     ]
 
-    all_passed = True
+    results = []
 
     for check_id, check_func, points in checks:
         try:
             passed, detail = check_func()
-            results["checks"].append({
+            results.append({
                 "id": check_id,
                 "passed": passed,
-                "points": points if passed else 0,
+                "points_achieved": points if passed else 0,
+                "points_total": points,
                 "detail": detail
             })
-            if passed:
-                results["total_points"] += points
-            else:
-                all_passed = False
         except Exception as e:
-            results["checks"].append({
+            results.append({
                 "id": check_id,
                 "passed": False,
-                "points": 0,
+                "points_achieved": 0,
+                "points_total": points,
                 "detail": f"Check failed with error: {str(e)}"
             })
-            all_passed = False
 
-    results["passed"] = all_passed
-
-    print(json.dumps(results, indent=2))
-
-    return 0 if all_passed else 1
+    return results
 
 if __name__ == "__main__":
-    exit(main())
+    results = run_programmatic_checks()
+    output_path = sys.argv[1] if len(sys.argv) > 1 else "verifier_output.json"
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2)
+    if not all(r["passed"] for r in results):
+        sys.exit(1)
