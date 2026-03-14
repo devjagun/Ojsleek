@@ -1,0 +1,77 @@
+networks:
+  medsource-net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_DB: medsource
+      POSTGRES_USER: medsource
+      POSTGRES_PASSWORD: medsource123
+    volumes:
+      - ./_seed_data/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - medsource-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medsource -d medsource"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rebate-engine:
+    build:
+      context: ./rebate_engine
+      dockerfile: Dockerfile
+    container_name: rebate-engine
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: medsource
+      DB_USER: medsource
+      DB_PASS: medsource123
+    ports:
+      - "5001:5001"
+    networks:
+      - medsource-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics:
+    build:
+      context: ./analytics
+      dockerfile: Dockerfile
+    container_name: analytics
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: medsource
+      DB_USER: medsource
+      DB_PASS: medsource123
+    ports:
+      - "5002:5002"
+    networks:
+      - medsource-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "9000:9000"
+    environment:
+      REBATE_ENGINE_URL: http://rebate-engine:5001
+      ANALYTICS_URL: http://analytics:5002
+    networks:
+      - medsource-net
+    depends_on:
+      - rebate-engine
+      - analytics

@@ -1,0 +1,9 @@
+Hey, I need help figuring out what is going on with our pharmacy rebate payouts at MedSource Distribution. Finance flagged that we have been overpaying on quarterly rebates by about eight hundred forty seven thousand dollars over the past quarter and nobody can pin down why.
+
+I have been getting different theories from everyone. The hospital contracts team thinks maybe hospital pricing is bleeding into pharmacy rebates somehow. Supply chain mentioned we had some seasonal flu medication surges in Q4 and maybe those are skewing calculations. The onboarding team pointed out we brought on three new specialty pharmacies recently and thinks their tier assignments might be wrong. And the pricing team is convinced it started when we updated manufacturer price lists in November.
+
+When I pull the numbers myself nothing obvious jumps out. Volume metrics look normal, customer classifications are tracking correctly, and our tier assignments seem fine. The overpayment seems concentrated among our specialty certified pharmacies and high volume accounts which makes it harder to isolate.
+
+Our rebate calculation system is pretty complex because it was built by the analytics team in the late nineties and they have since retired. The core calculation runs through a legacy Ada engine that nobody really touches anymore. I found a specification document that describes how the calculation is supposed to work, but I am not sure if the actual code matches.
+
+Can you dig into our systems and find the actual root cause of why rebates are inflated and fix whatever is causing it. Make sure to compare the actual code implementation against the specification to identify any discrepancies. I need to present findings to leadership next week. Write your analysis and recommendations to response.md when you are done.

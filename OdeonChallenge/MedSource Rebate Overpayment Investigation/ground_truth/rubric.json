@@ -1,0 +1,95 @@
+{
+  "task_id": "medsource_rebate_overpayment",
+  "max_score": 115,
+  "criteria": [
+    {
+      "id": "bug1_identification",
+      "points": 15,
+      "description": "Agent identifies the boundary condition bug where certification duration check uses >= 180 instead of > 180. Must show that customers certified for exactly 180 days incorrectly receive enhanced rates. Partial credit for noticing certification-related issues without pinpointing the exact boundary condition."
+    },
+    {
+      "id": "bug2_identification",
+      "points": 20,
+      "description": "Agent identifies the accumulation bug where specialty bonus and high volume bonus are added together instead of using exclusive conditional rates. Must show that code produces 1.30 instead of the correct 1.28 compound rate. Partial credit for noticing product mix factor issues without identifying the accumulation pattern."
+    },
+    {
+      "id": "bug1_fix",
+      "points": 15,
+      "description": "Agent corrects the boundary condition by changing >= 180 to > 180 in the Ada code. The fix must be in rebate_calc.adb not in wrapper files."
+    },
+    {
+      "id": "bug2_fix",
+      "points": 25,
+      "description": "Agent corrects the accumulation logic by implementing exclusive conditional checks where compound condition 1.28 is checked before individual conditions 1.18 and 1.12. Partial credit for fixes that address the issue but with suboptimal logic."
+    },
+    {
+      "id": "red_herring_hospital",
+      "points": 3,
+      "description": "Agent investigates hospital contracts theory and correctly dismisses it with evidence that hospital pricing is separate from pharmacy rebate calculations."
+    },
+    {
+      "id": "red_herring_seasonal",
+      "points": 3,
+      "description": "Agent investigates seasonal factors theory and correctly dismisses it with evidence that seasonal adjustments do not affect core rebate calculation."
+    },
+    {
+      "id": "red_herring_new_pharmacies",
+      "points": 2,
+      "description": "Agent investigates new specialty pharmacy onboarding theory and correctly dismisses it showing tier assignments are correct in database."
+    },
+    {
+      "id": "red_herring_price_lists",
+      "points": 2,
+      "description": "Agent investigates price list updates theory and correctly dismisses it showing price changes do not affect rebate multipliers."
+    },
+    {
+      "id": "recommendation_quality",
+      "points": 5,
+      "description": "Agent provides actionable recommendations including recalculating affected Q4 rebates and process improvements. Partial credit for incomplete recommendations."
+    }
+  ],
+  "penalties": [
+    {
+      "id": "blames_hospital_contracts",
+      "points": -10,
+      "description": "Apply if agent concludes hospital contract pricing is the primary cause of rebate overpayment."
+    },
+    {
+      "id": "blames_seasonal_factors",
+      "points": -10,
+      "description": "Apply if agent concludes seasonal adjustments are causing overpayments."
+    },
+    {
+      "id": "fabricated_bug",
+      "points": -15,
+      "description": "Apply if agent modifies wrapper files like app.py or main.go instead of fixing the actual Ada code."
+    },
+    {
+      "id": "wrong_bug_identified",
+      "points": -10,
+      "description": "Apply if agent identifies a bug that does not exist in the code."
+    },
+    {
+      "id": "no_data_evidence",
+      "points": -10,
+      "description": "Apply if agent claims findings without showing database queries or code analysis to support conclusions."
+    }
+  ],
+  "programmatic_checks": [
+    {
+      "id": "boundary_condition_fixed",
+      "points": 8,
+      "description": "Agent corrected the certification duration check from >= 180 to > 180 in the Ada code"
+    },
+    {
+      "id": "accumulation_logic_fixed",
+      "points": 8,
+      "description": "Agent corrected the product mix factor to use exclusive conditional logic with compound rate 1.28"
+    },
+    {
+      "id": "no_fabricated_bugs",
+      "points": 9,
+      "description": "Agent did not modify rebate_engine app.py, analytics app.py, or gateway main.go to mask the bug"
+    }
+  ]
+}
