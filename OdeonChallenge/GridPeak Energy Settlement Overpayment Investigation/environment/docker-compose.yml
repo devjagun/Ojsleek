@@ -1,0 +1,88 @@
+networks:
+  gridpeak-net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: gridpeak_postgres
+    environment:
+      POSTGRES_USER: gridpeak
+      POSTGRES_PASSWORD: settlement2024
+      POSTGRES_DB: energy_market
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./_seed_data/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./_seed_data/meter_readings.csv:/docker-entrypoint-initdb.d/meter_readings.csv
+    networks:
+      - gridpeak-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridpeak -d energy_market"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  loss_calculator:
+    build:
+      context: ./loss_calculator
+      dockerfile: Dockerfile
+    container_name: gridpeak_loss_calc
+    ports:
+      - "8081:8081"
+    networks:
+      - gridpeak-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: gridpeak
+      DB_PASSWORD: settlement2024
+      DB_NAME: energy_market
+
+  settlement_engine:
+    build:
+      context: ./settlement_engine
+      dockerfile: Dockerfile
+    container_name: gridpeak_settlement
+    ports:
+      - "8082:8082"
+    networks:
+      - gridpeak-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      loss_calculator:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: gridpeak
+      DB_PASSWORD: settlement2024
+      DB_NAME: energy_market
+      LOSS_CALC_URL: http://loss_calculator:8081
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gridpeak_gateway
+    ports:
+      - "8080:8080"
+    networks:
+      - gridpeak-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      settlement_engine:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: gridpeak
+      DB_PASSWORD: settlement2024
+      DB_NAME: energy_market
+      SETTLEMENT_URL: http://settlement_engine:8082
+      LOSS_CALC_URL: http://loss_calculator:8081

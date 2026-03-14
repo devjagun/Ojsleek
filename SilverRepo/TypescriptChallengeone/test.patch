@@ -1,0 +1,444 @@
+diff --git a/test.sh b/test.sh
+new file mode 100755
+index 0000000..c33888b
+--- /dev/null
++++ b/test.sh
+@@ -0,0 +1,13 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++MODE="${1:-new}"
++
++if [ "$MODE" = "base" ]; then
++  npm test -- --runInBand --testPathIgnorePatterns tests/array-some.test.ts
++elif [ "$MODE" = "new" ]; then
++  npm test -- --runInBand tests/array-some.test.ts
++else
++  echo "Usage: $0 [base|new]" >&2
++  exit 1
++fi
+diff --git a/tests/array-some.test.ts b/tests/array-some.test.ts
+new file mode 100644
+index 0000000..fdab8c1
+--- /dev/null
++++ b/tests/array-some.test.ts
+@@ -0,0 +1,419 @@
++import { match, P } from '../src';
++import { Equal, Expect } from '../src/types/helpers';
++
++describe('array chainable quantifiers and length constraints', () => {
++  describe('some()', () => {
++    it('matches when at least one element matches', () => {
++      const result = match([1, 'x', 2])
++        .with(P.array().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match when no element matches', () => {
++      const result = match([1, 2, 3])
++        .with(P.array().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match empty arrays', () => {
++      const result = match([] as unknown[])
++        .with(P.array().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match non-array inputs', () => {
++      const result = match<unknown, string>('abc')
++        .with(P.array().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches when the first valid element appears late', () => {
++      const result = match([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'target'])
++        .with(P.array().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('composes with array element subpattern', () => {
++      const yes = match([1, 2, 3])
++        .with(P.array(P.number).some(P.number.gt(2)), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const no = match([1, 2, '3'])
++        .with(P.array(P.number).some(P.number.gt(2)), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(yes).toBe('hit');
++      expect(no).toBe('miss');
++    });
++
++    it('works when chained with optional()', () => {
++      const yesUndefined = match<number[] | undefined, string>(undefined)
++        .with(P.array(P.number).some(P.number.gt(2)).optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const yesArray = match<number[] | undefined, string>([1, 3])
++        .with(P.array(P.number).some(P.number.gt(2)).optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const noArray = match<number[] | undefined, string>([1, 2])
++        .with(P.array(P.number).some(P.number.gt(2)).optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(yesUndefined).toBe('hit');
++      expect(yesArray).toBe('hit');
++      expect(noArray).toBe('miss');
++    });
++
++    it('select() after some() collects values from matching elements only', () => {
++      const result = match(['a', 10, 'b', 20, true])
++        .with(P.array().some(P.number.select('n')).select('all'), (sel) => sel)
++        .otherwise(() => ({ n: [], all: [] as unknown[] }));
++
++      expect(result).toStrictEqual({
++        n: [10, 20],
++        all: ['a', 10, 'b', 20, true],
++      });
++    });
++  });
++
++  describe('none()', () => {
++    it('matches when no element matches the subpattern', () => {
++      const result = match([1, 2, 3])
++        .with(P.array().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when at least one element matches the subpattern', () => {
++      const result = match([1, 'x', 3])
++        .with(P.array().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty arrays', () => {
++      const result = match([] as unknown[])
++        .with(P.array().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-array inputs', () => {
++      const result = match<unknown, string>('abc')
++        .with(P.array().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('returns empty list selections when there are no matches', () => {
++      const result = match([1, 2, 3])
++        .with(P.array().none(P.string.select('n')), (sel) => sel)
++        .otherwise(() => ({ n: [] as unknown[] }));
++
++      expect(result).toStrictEqual({ n: [] });
++    });
++  });
++
++  describe('every()', () => {
++    it('matches when every element matches the subpattern', () => {
++      const result = match([2, 4, 6])
++        .with(P.array().every(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when one element does not match', () => {
++      const result = match([2, 3, 6])
++        .with(P.array().every(P.number.lt(3)), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty arrays', () => {
++      const result = match([] as number[])
++        .with(P.array().every(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-array inputs', () => {
++      const result = match<unknown, string>(42)
++        .with(P.array().every(P.number), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('collects selections from all elements', () => {
++      const result = match([10, 20, 30])
++        .with(P.array().every(P.number.select('n')), (sel) => sel)
++        .otherwise(() => ({ n: [] as number[] }));
++
++      expect(result).toStrictEqual({ n: [10, 20, 30] });
++    });
++  });
++
++  describe('length constraints', () => {
++    it('minLength matches arrays with enough items', () => {
++      const hit = match([1, 2, 3])
++        .with(P.array().minLength(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1, 2])
++        .with(P.array().minLength(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('maxLength matches arrays up to the limit', () => {
++      const hit = match([1, 2])
++        .with(P.array().maxLength(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1, 2, 3])
++        .with(P.array().maxLength(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('length matches arrays with exact size', () => {
++      const hit = match([1, 2, 3])
++        .with(P.array().length(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1, 2])
++        .with(P.array().length(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('chains minLength and maxLength together', () => {
++      const hit = match([1, 2, 3])
++        .with(P.array().minLength(2).maxLength(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1])
++        .with(P.array().minLength(2).maxLength(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('empty matches only arrays with zero items', () => {
++      const hit = match([] as unknown[])
++        .with(P.array().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1])
++        .with(P.array().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('nonEmpty matches only arrays with one or more items', () => {
++      const hit = match([1])
++        .with(P.array().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([] as unknown[])
++        .with(P.array().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('throws on invalid minLength bound', () => {
++      expect(() => P.array().minLength(-1)).toThrow(
++        '`P.array().minLength` expected a non-negative integer, received -1'
++      );
++      expect(() => P.array().minLength(1.5)).toThrow(
++        '`P.array().minLength` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.array().minLength(Number.NaN)).toThrow(
++        '`P.array().minLength` expected a non-negative integer, received NaN'
++      );
++    });
++
++    it('throws on invalid maxLength and length bounds', () => {
++      expect(() => P.array().maxLength(Number.NaN)).toThrow(
++        '`P.array().maxLength` expected a non-negative integer, received NaN'
++      );
++      expect(() => P.array().maxLength(-1)).toThrow(
++        '`P.array().maxLength` expected a non-negative integer, received -1'
++      );
++      expect(() => P.array().maxLength(1.5)).toThrow(
++        '`P.array().maxLength` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.array().length(-2)).toThrow(
++        '`P.array().length` expected a non-negative integer, received -2'
++      );
++      expect(() => P.array().length(1.5)).toThrow(
++        '`P.array().length` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.array().length(Number.NaN)).toThrow(
++        '`P.array().length` expected a non-negative integer, received NaN'
++      );
++    });
++  });
++
++  describe('compositions', () => {
++    it('supports quantifier and length constraints in one branch', () => {
++      const hit = match([1, 2, 3, 4])
++        .with(P.array(P.number).some(P.number.gt(3)).minLength(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match([1, 2, 3])
++        .with(P.array(P.number).some(P.number.gt(3)).minLength(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('nested object patterns work inside some()', () => {
++      const input = [
++        { type: 'skip', value: 0 },
++        { type: 'target', value: 42 },
++      ] as const;
++
++      const result = match(input)
++        .with(
++          P.array().some({ type: 'target', value: P.number.gte(40) }),
++          () => 'hit'
++        )
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('can be used inside variadic tuple patterns', () => {
++      const input: [string, ...unknown[], string] = ['start', 1, 2, 'x', 'end'];
++
++      const result = match(input)
++        .with(['start', ...P.array().some(P.string), 'end'], () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('length chainable works with optional()', () => {
++      const f = (input: number[] | undefined) =>
++        match(input)
++          .with(P.array(P.number).minLength(2).optional(), () => 'hit')
++          .otherwise(() => 'miss');
++
++      expect(f(undefined)).toBe('hit');
++      expect(f([1, 2, 3])).toBe('hit');
++      expect(f([1])).toBe('miss');
++    });
++
++    it('length chainable works inside variadic tuple patterns', () => {
++      const input: [string, ...number[], string] = ['start', 1, 2, 3, 'end'];
++
++      const result = match(input)
++        .with(['start', ...P.array(P.number).minLength(2), 'end'], () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++  });
++
++  describe('type behavior', () => {
++    it('narrows arrays for matching branch', () => {
++      const f = (input: unknown[] | string) =>
++        match(input)
++          .with(P.array().some(P.number), (value) => {
++            type t = Expect<Equal<typeof value, unknown[]>>;
++            return value.length;
++          })
++          .otherwise(() => 0);
++
++      expect(f([1, 'x'])).toBe(2);
++      expect(f('x')).toBe(0);
++    });
++
++    it('length chainables narrow input type to the array branch', () => {
++      const f = (input: unknown[] | string) =>
++        match(input)
++          .with(P.array().minLength(1), (value) => {
++            type t = Expect<Equal<typeof value, unknown[]>>;
++            return value.length;
++          })
++          .otherwise(() => -1);
++
++      const g = (input: unknown[] | string) =>
++        match(input)
++          .with(P.array().nonEmpty(), (value) => {
++            type t = Expect<Equal<typeof value, unknown[]>>;
++            return value.length;
++          })
++          .otherwise(() => -1);
++
++      expect(f([1, 2])).toBe(2);
++      expect(f('abc')).toBe(-1);
++      expect(g([1])).toBe(1);
++      expect(g('abc')).toBe(-1);
++    });
++
++    it('preserves list-shaped named selection types in some()', () => {
++      const f = (input: Array<number | string>) =>
++        match(input)
++          .with(P.array().some(P.number.select('n')), (sel) => {
++            type t = Expect<Equal<typeof sel, { n: (number | string)[] }>>;
++            return sel.n.length;
++          })
++          .otherwise(() => 0);
++
++      expect(f([1, 'x', 2])).toBe(2);
++      expect(f(['x'])).toBe(0);
++    });
++
++    it('keeps list-shaped selection types for every() and none()', () => {
++      const fe = (input: Array<number | string>) =>
++        match(input)
++          .with(P.array().every(P.number.select('n')), (sel) => {
++            type t = Expect<Equal<typeof sel, { n: (number | string)[] }>>;
++            return sel.n;
++          })
++          .otherwise(() => []);
++
++      const fn = (input: Array<number | string>) =>
++        match(input)
++          .with(P.array().none(P.string.select('s')), (sel) => {
++            type t = Expect<Equal<typeof sel, { s: (number | string)[] }>>;
++            return sel.s;
++          })
++          .otherwise(() => null);
++
++      expect(fe([1, 2, 3])).toStrictEqual([1, 2, 3]);
++      expect(fn([1, 2, 3])).toStrictEqual([]);
++    });
++  });
++});

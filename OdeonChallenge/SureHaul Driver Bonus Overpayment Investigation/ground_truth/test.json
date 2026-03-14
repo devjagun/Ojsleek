@@ -1,0 +1,44 @@
+[
+  {
+    "id": "boundary_condition_fixed",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 8,
+    "detail": "Familiarity condition still uses >= 30"
+  },
+  {
+    "id": "priority_branch_fixed",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 8,
+    "detail": "Tier rate priority order still incorrect"
+  },
+  {
+    "id": "service_rebuilt",
+    "passed": true,
+    "points_achieved": 4,
+    "points_total": 4,
+    "detail": "bonus-calc service is running"
+  },
+  {
+    "id": "no_fabricated_bugs",
+    "passed": true,
+    "points_achieved": 10,
+    "points_total": 10,
+    "detail": "No fabricated bugs detected"
+  },
+  {
+    "id": "container_matches_workspace",
+    "passed": true,
+    "points_achieved": 5,
+    "points_total": 5,
+    "detail": "Container matches workspace"
+  },
+  {
+    "id": "calculation_correct",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 5,
+    "detail": "Boundary bug still present: zone_factor=0.81 (expected ~0.92 for 30 days)"
+  }
+]

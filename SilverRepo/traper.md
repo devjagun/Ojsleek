@@ -1,0 +1,1 @@
+can we add AI traps that will not cause unfairness to the test.patch... look at the format "TypescriptWorkFlowFormat_v3.md" for a trap we can use or apply to the test cases as 5 models passed and thats too many

@@ -12,17 +12,17 @@ Returns status of all backend services.
 
 ### Rebate Engine Proxy
 ```
-GET /rebate/*
-POST /rebate/*
+GET /api/rebate/*
+POST /api/rebate/*
 ```
-Proxies requests to the rebate engine service.
+Proxies requests to the rebate engine service (strips `/api` prefix).
 
 ### Analytics Proxy
 ```
-GET /analytics/*
-POST /analytics/*
+GET /api/analytics/*
+POST /api/analytics/*
 ```
-Proxies requests to the analytics service.
+Proxies requests to the analytics service (strips `/api` prefix).
 
 ---
 
@@ -42,19 +42,20 @@ Content-Type: application/json
 Request:
 {
     "customer_id": 123,
-    "start_date": "2024-10-01",
-    "end_date": "2024-12-31"
+    "total_units": 67234,
+    "base_revenue": 238456.00,
+    "certification_days": 185,
+    "specialty_certified": true,
+    "customer_class": 2
 }
 
 Response:
 {
     "customer_id": 123,
-    "total_rebate": 12543.78,
     "volume_index": 1.10,
     "product_mix_factor": 1.18,
     "customer_class_rate": 0.04,
-    "base_revenue": 238456.00,
-    "total_units": 67234
+    "calculated_rebate": 12543.78
 }
 ```
 
@@ -63,21 +64,12 @@ Response:
 POST /batch-calculate
 Content-Type: application/json
 
-Request:
-{
-    "customer_ids": [123, 456, 789],
-    "start_date": "2024-10-01",
-    "end_date": "2024-12-31"
-}
+Request: (empty body, processes all payments with calculated_rebate IS NULL)
 
 Response:
 {
-    "results": [
-        {"customer_id": 123, "total_rebate": 12543.78, ...},
-        {"customer_id": 456, "total_rebate": 8234.56, ...},
-        {"customer_id": 789, "total_rebate": 5678.90, ...}
-    ],
-    "total_rebate_sum": 26457.24
+    "processed": 1247,
+    "total_rebate": 2847234.56
 }
 ```
 

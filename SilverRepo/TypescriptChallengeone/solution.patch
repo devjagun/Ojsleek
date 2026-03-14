@@ -1,0 +1,556 @@
+diff --git a/src/internals/array-matcher-utils.ts b/src/internals/array-matcher-utils.ts
+new file mode 100644
+index 0000000..60f0887
+--- /dev/null
++++ b/src/internals/array-matcher-utils.ts
+@@ -0,0 +1,132 @@
++import { matchPattern } from './helpers';
++
++// @internal
++const matchElementSelections = (
++  element: unknown,
++  pattern: unknown
++): Record<string, unknown[]> | null => {
++  const itemSelections: Record<string, unknown[]> = {};
++  const matched = matchPattern(pattern, element, (key, val) => {
++    itemSelections[key] = (itemSelections[key] || []).concat([val]);
++  });
++  return matched ? itemSelections : null;
++};
++
++// @internal
++const mergeSelections = (
++  accumulator: Record<string, unknown[]>,
++  additions: Record<string, unknown[]>
++): void => {
++  for (const key of Object.keys(additions)) {
++    accumulator[key] = (accumulator[key] || []).concat(additions[key]);
++  }
++};
++
++// @internal
++const ensureRequiredKeys = (
++  selections: Record<string, unknown[]>,
++  requiredKeys: readonly string[]
++): void => {
++  for (const key of requiredKeys) {
++    if (!(key in selections)) {
++      selections[key] = [];
++    }
++  }
++};
++
++// @internal
++export const evaluateArraySome = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++) => {
++  if (!Array.isArray(value) || value.length === 0) return { matched: false };
++
++  const selections: Record<string, unknown[]> = {};
++  let matchedAny = false;
++
++  for (let i = 0; i < value.length; i++) {
++    const itemSelections = matchElementSelections(value[i], pattern);
++    if (itemSelections === null) continue;
++    matchedAny = true;
++    mergeSelections(selections, itemSelections);
++  }
++
++  if (!matchedAny) return { matched: false };
++  ensureRequiredKeys(selections, selectionKeys);
++  return { matched: true, selections };
++};
++
++// @internal
++export const evaluateArrayNone = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++) => {
++  if (!Array.isArray(value)) return { matched: false };
++  for (let i = 0; i < value.length; i++) {
++    if (matchPattern(pattern, value[i], () => {})) return { matched: false };
++  }
++  const selections: Record<string, unknown[]> = {};
++  ensureRequiredKeys(selections, selectionKeys);
++  return { matched: true, selections };
++};
++
++// @internal
++export const evaluateArrayEvery = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++) => {
++  if (!Array.isArray(value)) return { matched: false };
++
++  const selections: Record<string, unknown[]> = {};
++
++  for (let i = 0; i < value.length; i++) {
++    const itemSelections = matchElementSelections(value[i], pattern);
++    if (itemSelections === null) return { matched: false };
++    mergeSelections(selections, itemSelections);
++  }
++
++  ensureRequiredKeys(selections, selectionKeys);
++  return { matched: true, selections };
++};
++
++// @internal
++export const evaluateArrayMinLength = (value: unknown, min: number) => {
++  if (!Array.isArray(value)) return { matched: false };
++  return { matched: value.length >= min };
++};
++
++// @internal
++export const evaluateArrayMaxLength = (value: unknown, max: number) => {
++  if (!Array.isArray(value)) return { matched: false };
++  return { matched: value.length <= max };
++};
++
++// @internal
++export const evaluateArrayLength = (value: unknown, len: number) => {
++  if (!Array.isArray(value)) return { matched: false };
++  return { matched: value.length === len };
++};
++
++// @internal
++export const evaluateArrayEmpty = (value: unknown) => {
++  if (!Array.isArray(value)) return { matched: false };
++  return { matched: value.length === 0 };
++};
++
++// @internal
++export const evaluateArrayNonEmpty = (value: unknown) => {
++  if (!Array.isArray(value)) return { matched: false };
++  return { matched: value.length > 0 };
++};
++
++// @internal
++export const assertNonNegativeInteger = (name: string, value: number) => {
++  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
++    throw new Error(
++      `\`${name}\` expected a non-negative integer, received ${String(value)}`
++    );
++  }
++};
+diff --git a/src/patterns.ts b/src/patterns.ts
+index d80a5e0..3d04847 100644
+--- a/src/patterns.ts
++++ b/src/patterns.ts
+@@ -6,6 +6,17 @@
+  */
+ 
+ import { matchPattern, getSelectionKeys, flatMap } from './internals/helpers';
++import {
++  evaluateArraySome,
++  evaluateArrayNone,
++  evaluateArrayEvery,
++  evaluateArrayMinLength,
++  evaluateArrayMaxLength,
++  evaluateArrayLength,
++  evaluateArrayEmpty,
++  evaluateArrayNonEmpty,
++  assertNonNegativeInteger,
++} from './internals/array-matcher-utils';
+ import * as symbols from './internals/symbols';
+ import { matcher } from './internals/symbols';
+ import { isMatching } from './is-matching';
+@@ -17,6 +28,14 @@ import {
+   UnknownValuePattern,
+   OptionalP,
+   ArrayP,
++  ArraySomeP,
++  ArrayNoneP,
++  ArrayEveryP,
++  ArrayMinLengthP,
++  ArrayMaxLengthP,
++  ArrayLengthP,
++  ArrayEmptyP,
++  ArrayNonEmptyP,
+   MapP,
+   SetP,
+   AndP,
+@@ -167,13 +186,146 @@ function arrayChainable<pattern extends Matcher<any, any, any, any, any>>(
+ ): ArrayChainable<pattern> {
+   return Object.assign(variadic(pattern), {
+     optional: () => arrayChainable(optional(pattern)),
++    some: (p2: any) =>
++      arrayChainable(intersection(pattern, arraySome(p2)) as any),
++    none: (p2: any) =>
++      arrayChainable(intersection(pattern, arrayNone(p2)) as any),
++    every: (p2: any) =>
++      arrayChainable(intersection(pattern, arrayEvery(p2)) as any),
++    minLength: (min: number) =>
++      arrayChainable(intersection(pattern, arrayMinLength(min)) as any),
++    maxLength: (max: number) =>
++      arrayChainable(intersection(pattern, arrayMaxLength(max)) as any),
++    length: (len: number) =>
++      arrayChainable(intersection(pattern, arrayLength(len)) as any),
++    empty: () => arrayChainable(intersection(pattern, arrayEmpty()) as any),
++    nonEmpty: () =>
++      arrayChainable(intersection(pattern, arrayNonEmpty()) as any),
+     select: (key: any) =>
+       arrayChainable(
+         key === undefined ? select(pattern) : select(key, pattern)
+       ),
+   }) as any;
+ }
+ 
++function arraySome<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapArray<input>, unknown>>
++>(pattern: pattern): Chainable<ArraySomeP<input, pattern>> {
++  const selectionKeys = getSelectionKeys(pattern);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArraySome(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'arraySome',
++      };
++    },
++  });
++}
++
++function arrayNone<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapArray<input>, unknown>>
++>(pattern: pattern): Chainable<ArrayNoneP<input, pattern>> {
++  const selectionKeys = getSelectionKeys(pattern);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayNone(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'arrayNone',
++      };
++    },
++  });
++}
++
++function arrayEvery<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapArray<input>, unknown>>
++>(pattern: pattern): Chainable<ArrayEveryP<input, pattern>> {
++  const selectionKeys = getSelectionKeys(pattern);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayEvery(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'arrayEvery',
++      };
++    },
++  });
++}
++
++function arrayMinLength<input, const min extends number>(
++  min: min
++): Chainable<ArrayMinLengthP<input, min>> {
++  assertNonNegativeInteger('P.array().minLength', min);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayMinLength(value, min),
++        matcherType: 'arrayMinLength',
++      };
++    },
++  });
++}
++
++function arrayMaxLength<input, const max extends number>(
++  max: max
++): Chainable<ArrayMaxLengthP<input, max>> {
++  assertNonNegativeInteger('P.array().maxLength', max);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayMaxLength(value, max),
++        matcherType: 'arrayMaxLength',
++      };
++    },
++  });
++}
++
++function arrayLength<input, const len extends number>(
++  len: len
++): Chainable<ArrayLengthP<input, len>> {
++  assertNonNegativeInteger('P.array().length', len);
++
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayLength(value, len),
++        matcherType: 'arrayLength',
++      };
++    },
++  });
++}
++
++function arrayEmpty<input>(): Chainable<ArrayEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayEmpty(value),
++        matcherType: 'arrayEmpty',
++      };
++    },
++  });
++}
++
++function arrayNonEmpty<input>(): Chainable<ArrayNonEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateArrayNonEmpty(value),
++        matcherType: 'arrayNonEmpty',
++      };
++    },
++  });
++}
++
+ /**
+  * `P.optional(subpattern)` takes a sub pattern and returns a pattern which matches if the
+  * key is undefined or if it is defined and the sub pattern matches its value.
+diff --git a/src/types/FindSelected.ts b/src/types/FindSelected.ts
+index cd132e3..3c17f7d 100644
+--- a/src/types/FindSelected.ts
++++ b/src/types/FindSelected.ts
+@@ -116,6 +116,20 @@ export type FindSelectionUnion<
+       array: i extends readonly (infer iItem)[]
+         ? MapList<FindSelectionUnion<iItem, pattern>>
+         : never;
++      arraySome: i extends readonly (infer iItem)[]
++        ? MapList<FindSelectionUnion<iItem, pattern>>
++        : never;
++      arrayNone: i extends readonly (infer iItem)[]
++        ? MapList<FindSelectionUnion<iItem, pattern>>
++        : never;
++      arrayEvery: i extends readonly (infer iItem)[]
++        ? MapList<FindSelectionUnion<iItem, pattern>>
++        : never;
++      arrayMinLength: never;
++      arrayMaxLength: never;
++      arrayLength: never;
++      arrayEmpty: never;
++      arrayNonEmpty: never;
+       record: [i, pattern] extends [
+         Record<infer k, infer v>,
+         [infer pkey, infer pvalue]
+diff --git a/src/types/InvertPattern.ts b/src/types/InvertPattern.ts
+index bfa961e..6057553 100644
+--- a/src/types/InvertPattern.ts
++++ b/src/types/InvertPattern.ts
+@@ -120,6 +120,14 @@ type InvertPatternInternal<p, input> = 0 extends 1 & p
+       not: DeepExclude<input, InvertPatternInternal<subpattern, input>>;
+       select: InvertPatternInternal<subpattern, input>;
+       array: InvertPatternInternal<subpattern, ReadonlyArrayValue<input>>[];
++      arraySome: input extends readonly any[] ? input : never;
++      arrayNone: input extends readonly any[] ? input : never;
++      arrayEvery: input extends readonly any[] ? input : never;
++      arrayMinLength: input extends readonly any[] ? input : never;
++      arrayMaxLength: input extends readonly any[] ? input : never;
++      arrayLength: input extends readonly any[] ? input : never;
++      arrayEmpty: input extends readonly any[] ? input : never;
++      arrayNonEmpty: input extends readonly any[] ? input : never;
+       record: subpattern extends [infer pk, infer pv]
+         ? Record<
+             Extract<InvertPatternInternal<pk, RecordKey<input>>, PropertyKey>,
+@@ -331,6 +339,29 @@ type InvertPatternForExcludeInternal<p, i, empty = never> =
+               IsReadonlyArray<i>
+             >
+           : empty;
++        arraySome: i extends readonly (infer ii)[]
++          ? MaybeAddReadonly<
++              InvertPatternForExcludeInternal<subpattern, ii, empty>[],
++              IsReadonlyArray<i>
++            >
++          : empty;
++        arrayNone: i extends readonly (infer ii)[]
++          ? MaybeAddReadonly<
++              InvertPatternForExcludeInternal<subpattern, ii, empty>[],
++              IsReadonlyArray<i>
++            >
++          : empty;
++        arrayEvery: i extends readonly (infer ii)[]
++          ? MaybeAddReadonly<
++              InvertPatternForExcludeInternal<subpattern, ii, empty>[],
++              IsReadonlyArray<i>
++            >
++          : empty;
++        arrayMinLength: i extends readonly any[] ? i : empty;
++        arrayMaxLength: i extends readonly any[] ? i : empty;
++        arrayLength: i extends readonly any[] ? i : empty;
++        arrayEmpty: i extends readonly any[] ? i : empty;
++        arrayNonEmpty: i extends readonly any[] ? i : empty;
+         record: subpattern extends [infer pk, infer pv]
+           ? Record<
+               Extract<
+diff --git a/src/types/Pattern.ts b/src/types/Pattern.ts
+index 9145857..ce7985d 100644
+--- a/src/types/Pattern.ts
++++ b/src/types/Pattern.ts
+@@ -10,6 +10,14 @@ export type MatcherType =
+   | 'or'
+   | 'and'
+   | 'array'
++  | 'arraySome'
++  | 'arrayNone'
++  | 'arrayEvery'
++  | 'arrayMinLength'
++  | 'arrayMaxLength'
++  | 'arrayLength'
++  | 'arrayEmpty'
++  | 'arrayNonEmpty'
+   | 'record'
+   | 'map'
+   | 'set'
+@@ -93,6 +101,34 @@ export type CustomP<input, pattern, narrowedOrFn> = Matcher<
+ 
+ export type ArrayP<input, p> = Matcher<input, p, 'array'>;
+ 
++export type ArraySomeP<input, p> = Matcher<input, p, 'arraySome'>;
++
++export type ArrayNoneP<input, p> = Matcher<input, p, 'arrayNone'>;
++
++export type ArrayEveryP<input, p> = Matcher<input, p, 'arrayEvery'>;
++
++export type ArrayMinLengthP<input, min extends number> = Matcher<
++  input,
++  min,
++  'arrayMinLength'
++>;
++
++export type ArrayMaxLengthP<input, max extends number> = Matcher<
++  input,
++  max,
++  'arrayMaxLength'
++>;
++
++export type ArrayLengthP<input, len extends number> = Matcher<
++  input,
++  len,
++  'arrayLength'
++>;
++
++export type ArrayEmptyP<input> = Matcher<input, never, 'arrayEmpty'>;
++
++export type ArrayNonEmptyP<input> = Matcher<input, never, 'arrayNonEmpty'>;
++
+ export type RecordP<input, pkey, pvalue> = Matcher<
+   input,
+   [pkey, pvalue],
+@@ -678,6 +714,105 @@ export type ArrayChainable<
+       select<input, k extends string>(
+         key: k
+       ): ArrayChainable<SelectP<k, input, pattern>, omitted | 'select'>;
++
++      /**
++       * `P.array().some(pattern)` matches arrays containing at least one element matching `pattern`.
++       * Empty arrays never match. Selections collect values from all matching elements.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().some(P.number.gt(5)), () => 'array has a number > 5')
++       */
++      some<
++        input,
++        const p extends Pattern<WithDefault<ReadonlyArrayValue<input>, unknown>>
++      >(
++        pattern: p
++      ): ArrayChainable<AndP<input, [pattern, ArraySomeP<input, p>]>, omitted>;
++
++      /**
++       * `P.array().none(pattern)` matches arrays where no element matches `pattern`.
++       * Empty arrays always match. Selections return empty lists.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().none(P.number.lt(0)), () => 'no negative numbers')
++       */
++      none<
++        input,
++        const p extends Pattern<WithDefault<ReadonlyArrayValue<input>, unknown>>
++      >(
++        pattern: p
++      ): ArrayChainable<AndP<input, [pattern, ArrayNoneP<input, p>]>, omitted>;
++
++      /**
++       * `P.array().every(pattern)` matches arrays where every element matches `pattern`.
++       * Empty arrays always match. Selections collect values from all elements.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().every(P.number.positive()), () => 'all positive numbers')
++       */
++      every<
++        input,
++        const p extends Pattern<WithDefault<ReadonlyArrayValue<input>, unknown>>
++      >(
++        pattern: p
++      ): ArrayChainable<AndP<input, [pattern, ArrayEveryP<input, p>]>, omitted>;
++
++      /**
++       * `P.array().minLength(n)` matches arrays with at least `n` elements.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().minLength(3), () => 'array has at least 3 elements')
++       */
++      minLength<input, const min extends number>(
++        min: min
++      ): ArrayChainable<AndP<input, [pattern, ArrayMinLengthP<input, min>]>, omitted>;
++
++      /**
++       * `P.array().maxLength(n)` matches arrays with at most `n` elements.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().maxLength(5), () => 'array has at most 5 elements')
++       */
++      maxLength<input, const max extends number>(
++        max: max
++      ): ArrayChainable<AndP<input, [pattern, ArrayMaxLengthP<input, max>]>, omitted>;
++
++      /**
++       * `P.array().length(n)` matches arrays with exactly `n` elements.
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().length(2), () => 'array has exactly 2 elements')
++       */
++      length<input, const len extends number>(
++        len: len
++      ): ArrayChainable<AndP<input, [pattern, ArrayLengthP<input, len>]>, omitted>;
++
++      /**
++       * `P.array().empty()` matches empty arrays (length === 0).
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().empty(), () => 'array is empty')
++       */
++      empty<input>(): ArrayChainable<AndP<input, [pattern, ArrayEmptyP<input>]>, omitted>;
++
++      /**
++       * `P.array().nonEmpty()` matches non-empty arrays (length > 0).
++       *
++       * @example
++       *  match(value)
++       *   .with(P.array().nonEmpty(), () => 'array is not empty')
++       */
++      nonEmpty<input>(): ArrayChainable<
++        AndP<input, [pattern, ArrayNonEmptyP<input>]>,
++        omitted
++      >;
+     },
+     omitted
+   >;

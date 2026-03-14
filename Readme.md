@@ -1,1 +1,0 @@
-Sleek compound data points

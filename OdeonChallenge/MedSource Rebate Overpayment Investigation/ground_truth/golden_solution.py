@@ -1,39 +1,47 @@
 #!/usr/bin/env python3
-
+import subprocess
 import os
-import sys
-import re
 
+def get_workspace_path():
+    if os.path.exists("/workspace/rebate_engine"):
+        return "/workspace"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(script_dir), "environment")
 
-def fix_rebate_calc_ada(env_path):
-    ada_file = os.path.join(env_path, "rebate_engine", "rebate_calc.adb")
+WORKSPACE = get_workspace_path()
+ADA_PATH = os.path.join(WORKSPACE, "rebate_engine", "rebate_calc.adb")
 
-    if not os.path.exists(ada_file):
-        return False, f"Ada file not found: {ada_file}"
+def read_file(path):
+    with open(path, 'r') as f:
+        return f.read()
 
-    with open(ada_file, 'r') as f:
-        content = f.read()
+def write_file(path, content):
+    with open(path, 'w') as f:
+        f.write(content)
 
+def fix_rebate_calc_ada():
+    content = read_file(ADA_PATH)
     original_content = content
 
-    content = re.sub(
-        r'Qualifies_Cert\s*:=\s*\(Cert_Days\s*>=\s*180\)',
-        'Qualifies_Cert := (Cert_Days > 180)',
-        content
+    # Fix 1: Change certification duration check from >= 180 to > 180
+    content = content.replace(
+        'Qualifies_Cert := (Cert_Days >= 180);',
+        'Qualifies_Cert := (Cert_Days > 180);'
     )
 
-    buggy_pattern = r'''if Has_Spec_Cert and Qualifies_Cert then
-         Factor := Factor \+ 0\.18;
+    # Fix 2: Change product mix factor from accumulation to exclusive logic
+    old_logic = """      if Has_Spec_Cert and Qualifies_Cert then
+         Factor := Factor + 0.18;
       end if;
 
       if Is_High_Volume then
-         Factor := Factor \+ 0\.12;
+         Factor := Factor + 0.12;
       end if;
 
-      Factor := Float\(Integer\(Factor \* 100\.0 \+ 0\.5\)\) / 100\.0;
-      return Factor;'''
+      Factor := Float(Integer(Factor * 100.0 + 0.5)) / 100.0;
+      return Factor;"""
 
-    fixed_logic = '''if Has_Spec_Cert and Qualifies_Cert and Is_High_Volume then
+    new_logic = """      if Has_Spec_Cert and Qualifies_Cert and Is_High_Volume then
          Factor := 1.28;
       elsif Has_Spec_Cert and Qualifies_Cert then
          Factor := 1.18;
@@ -43,51 +51,41 @@ def fix_rebate_calc_ada(env_path):
          Factor := 1.00;
       end if;
 
-      return Factor;'''
+      return Factor;"""
 
-    content = re.sub(buggy_pattern, fixed_logic, content, flags=re.DOTALL)
+    content = content.replace(old_logic, new_logic)
 
     if content == original_content:
-        return False, "No changes were applied - patterns may have already been fixed or not found"
+        return False
 
-    with open(ada_file, 'w') as f:
-        f.write(content)
+    write_file(ADA_PATH, content)
+    return True
 
-    return True, "Successfully applied both fixes to rebate_calc.adb"
-
+def rebuild_service():
+    os.chdir(WORKSPACE)
+    subprocess.run(
+        ["docker", "compose", "build", "rebate-engine"],
+        check=True,
+        capture_output=True
+    )
+    subprocess.run(
+        ["docker", "compose", "up", "-d", "rebate-engine"],
+        check=True,
+        capture_output=True
+    )
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python golden_solution.py <path_to_environment_dir>")
-        print("Example: python golden_solution.py ./environment")
-        sys.exit(1)
-
-    env_path = sys.argv[1]
-
-    if not os.path.isdir(env_path):
-        print(f"Error: Directory not found: {env_path}")
-        sys.exit(1)
-
-    print("MedSource Rebate Overpayment Investigation - Golden Solution")
-    print("=" * 60)
-    print()
-
-    print("Applying fixes to rebate_calc.adb...")
-    success, message = fix_rebate_calc_ada(env_path)
-
-    if success:
-        print(f"OK {message}")
-        print()
-        print("Fixes applied:")
-        print("  1. Changed certification duration check from >= 180 to > 180")
-        print("  2. Changed product mix factor from accumulation to exclusive logic")
-        print()
-        print("The rebate calculation should now be correct per PRMS specification.")
-        sys.exit(0)
+    print("Fixing Ada rebate calculator...")
+    if fix_rebate_calc_ada():
+        print("  Fixed: Changed certification check and product mix logic")
     else:
-        print(f"FAIL {message}")
-        sys.exit(1)
+        print("  Already fixed or pattern not found")
 
+    print("Rebuilding service...")
+    rebuild_service()
+    print("  Service rebuilt")
+
+    print("Golden solution applied successfully")
 
 if __name__ == "__main__":
     main()

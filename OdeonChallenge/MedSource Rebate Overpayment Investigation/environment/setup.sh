@@ -1,45 +1,69 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "==================================="
-echo "MedSource Rebate Investigation Setup"
-echo "==================================="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
 
-# Navigate to environment directory
-cd "$(dirname "$0")"
+command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found"; exit 1; }
 
-# Stop any existing containers
-echo "Stopping existing containers..."
-docker compose down -v 2>/dev/null || true
+if [ ! -d "$SCRIPT_DIR/_seed_data" ]; then
+    mkdir -p "$SCRIPT_DIR/_seed_data"
+fi
 
-# Build all services
-echo "Building services..."
-docker compose build --no-cache
+if [ ! -f "$SCRIPT_DIR/_seed_data/init.sql" ]; then
+    cd "$SCRIPT_DIR"
+    python3 generate_data.py
+fi
 
-# Start all services
-echo "Starting services..."
-docker compose up -d
+docker compose -f "$COMPOSE_FILE" build --quiet
 
-# Wait for health checks
-echo "Waiting for services to be ready..."
-sleep 5
+docker compose -f "$COMPOSE_FILE" up -d
 
-# Check health
-bash ./healthcheck.sh
+echo "Waiting for postgres..."
+for i in {1..30}; do
+    if docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U medsource -d medsource >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
 
-echo ""
-echo "==================================="
-echo "Setup complete!"
-echo "==================================="
-echo ""
-echo "Services available at:"
-echo "  Gateway API:    http://localhost:9000"
-echo "  Rebate Engine:  http://localhost:5001"
-echo "  Analytics:      http://localhost:5002"
-echo "  PostgreSQL:     localhost:5432"
-echo ""
-echo "Database credentials:"
-echo "  User: medsource"
-echo "  Password: medsource123"
-echo "  Database: medsource"
-echo ""
+echo "Waiting for gateway..."
+for i in {1..30}; do
+    if curl -sf http://localhost:9000/health >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
+
+echo "Waiting for rebate-engine..."
+for i in {1..30}; do
+    if curl -sf http://localhost:5001/health >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
+
+echo "Waiting for analytics..."
+for i in {1..30}; do
+    if curl -sf http://localhost:5002/health >/dev/null 2>&1; then
+        break
+    fi
+    sleep 2
+done
+
+curl -sf http://localhost:9000/health >/dev/null || { echo "FAIL: gateway not responding"; exit 1; }
+curl -sf http://localhost:5001/health >/dev/null || { echo "FAIL: rebate-engine not responding"; exit 1; }
+curl -sf http://localhost:5002/health >/dev/null || { echo "FAIL: analytics not responding"; exit 1; }
+
+echo "All services ready"
+
+echo "Running batch rebate calculation..."
+# This populates calculated_rebate in rebate_payments using the Ada calculation engine
+if curl -sf -X POST http://localhost:5001/batch-calculate >/dev/null 2>&1; then
+    echo "Batch calculation complete"
+else
+    echo "WARNING: batch-calculate failed (may already be populated)"
+fi
+
+exit 0

@@ -1,0 +1,1096 @@
+diff --git a/src/internals/map-set-utils.ts b/src/internals/map-set-utils.ts
+new file mode 100644
+index 0000000..8f4e677
+--- /dev/null
++++ b/src/internals/map-set-utils.ts
+@@ -0,0 +1,391 @@
++import { getSelectionKeys, matchPattern } from './helpers';
++
++export type SelectionLists = Record<string, unknown[]>;
++
++type ItemMatch = {
++  matched: boolean;
++  selections: SelectionLists;
++};
++
++type QuantifierResult = {
++  matched: boolean;
++  selections?: SelectionLists;
++};
++
++const hasOwn = (obj: object, key: string) =>
++  Object.prototype.hasOwnProperty.call(obj, key);
++
++const emptySelections = (): SelectionLists => ({});
++
++const emptySelectionsForKeys = (keys: readonly string[]): SelectionLists => {
++  const selections = emptySelections();
++  for (let i = 0; i < keys.length; i++) {
++    selections[keys[i]] = [];
++  }
++  return selections;
++};
++
++const appendSelectionValue = (
++  target: SelectionLists,
++  key: string,
++  value: unknown
++) => {
++  if (!hasOwn(target, key)) {
++    target[key] = [value];
++    return;
++  }
++  target[key].push(value);
++};
++
++const mergeSelectionLists = (
++  target: SelectionLists,
++  source: SelectionLists
++) => {
++  const keys = Object.keys(source);
++  for (let i = 0; i < keys.length; i++) {
++    const key = keys[i];
++    const values = source[key];
++    if (!hasOwn(target, key)) {
++      target[key] = values.slice();
++      continue;
++    }
++    for (let j = 0; j < values.length; j++) {
++      target[key].push(values[j]);
++    }
++  }
++};
++
++const ensureSelectionKeys = (
++  keys: readonly string[],
++  target: SelectionLists
++) => {
++  for (let i = 0; i < keys.length; i++) {
++    const key = keys[i];
++    if (!hasOwn(target, key)) {
++      target[key] = [];
++    }
++  }
++};
++
++const createSelectionCollector = (target: SelectionLists) => {
++  return (key: string, selected: unknown) => {
++    appendSelectionValue(target, key, selected);
++  };
++};
++
++const matchItemWithSelections = (
++  pattern: unknown,
++  item: unknown
++): ItemMatch => {
++  const selections = emptySelections();
++  const matched = matchPattern(
++    pattern,
++    item,
++    createSelectionCollector(selections)
++  );
++  return { matched, selections };
++};
++
++export const getPatternSelectionKeys = (pattern: unknown): string[] =>
++  getSelectionKeys(pattern);
++
++const isSetInput = (value: unknown): value is Set<unknown> =>
++  value instanceof Set;
++
++const isMapInput = (value: unknown): value is Map<unknown, unknown> =>
++  value instanceof Map;
++
++// ---------------------------------------------------------------------------
++// Set quantifiers
++// ---------------------------------------------------------------------------
++
++export const evaluateSetSome = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isSetInput(value) || value.size === 0) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++  let matchedAny = false;
++
++  for (const item of value) {
++    const itemResult = matchItemWithSelections(pattern, item);
++    if (!itemResult.matched) continue;
++    matchedAny = true;
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  if (!matchedAny) {
++    return { matched: false };
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++export const evaluateSetEvery = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isSetInput(value)) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++
++  for (const item of value) {
++    const itemResult = matchItemWithSelections(pattern, item);
++    if (!itemResult.matched) {
++      return { matched: false };
++    }
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++export const evaluateSetNone = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isSetInput(value)) {
++    return { matched: false };
++  }
++
++  for (const item of value) {
++    if (matchPattern(pattern, item, () => {})) {
++      return { matched: false };
++    }
++  }
++
++  return {
++    matched: true,
++    selections: emptySelectionsForKeys(selectionKeys),
++  };
++};
++
++// ---------------------------------------------------------------------------
++// Set size constraints
++// ---------------------------------------------------------------------------
++
++export const evaluateSetMinSize = (
++  value: unknown,
++  min: number
++): QuantifierResult => {
++  if (!isSetInput(value)) return { matched: false };
++  return { matched: value.size >= min };
++};
++
++export const evaluateSetMaxSize = (
++  value: unknown,
++  max: number
++): QuantifierResult => {
++  if (!isSetInput(value)) return { matched: false };
++  return { matched: value.size <= max };
++};
++
++export const evaluateSetSize = (
++  value: unknown,
++  n: number
++): QuantifierResult => {
++  if (!isSetInput(value)) return { matched: false };
++  return { matched: value.size === n };
++};
++
++export const evaluateSetEmpty = (value: unknown): QuantifierResult => {
++  if (!isSetInput(value)) return { matched: false };
++  return { matched: value.size === 0 };
++};
++
++export const evaluateSetNonEmpty = (value: unknown): QuantifierResult => {
++  if (!isSetInput(value)) return { matched: false };
++  return { matched: value.size > 0 };
++};
++
++// ---------------------------------------------------------------------------
++// Map key quantifiers
++// ---------------------------------------------------------------------------
++
++export const evaluateMapSomeKey = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isMapInput(value) || value.size === 0) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++  let matchedAny = false;
++
++  for (const key of value.keys()) {
++    const itemResult = matchItemWithSelections(pattern, key);
++    if (!itemResult.matched) continue;
++    matchedAny = true;
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  if (!matchedAny) {
++    return { matched: false };
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++export const evaluateMapEveryKey = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isMapInput(value)) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++
++  for (const key of value.keys()) {
++    const itemResult = matchItemWithSelections(pattern, key);
++    if (!itemResult.matched) {
++      return { matched: false };
++    }
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++export const evaluateMapNoneKey = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isMapInput(value)) {
++    return { matched: false };
++  }
++
++  for (const key of value.keys()) {
++    if (matchPattern(pattern, key, () => {})) {
++      return { matched: false };
++    }
++  }
++
++  return {
++    matched: true,
++    selections: emptySelectionsForKeys(selectionKeys),
++  };
++};
++
++// ---------------------------------------------------------------------------
++// Map value quantifiers
++// ---------------------------------------------------------------------------
++
++export const evaluateMapSomeValue = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isMapInput(value) || value.size === 0) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++  let matchedAny = false;
++
++  for (const val of value.values()) {
++    const itemResult = matchItemWithSelections(pattern, val);
++    if (!itemResult.matched) continue;
++    matchedAny = true;
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  if (!matchedAny) {
++    return { matched: false };
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++export const evaluateMapEveryValue = (
++  value: unknown,
++  pattern: unknown,
++  selectionKeys: readonly string[]
++): QuantifierResult => {
++  if (!isMapInput(value)) {
++    return { matched: false };
++  }
++
++  const selections = emptySelections();
++
++  for (const val of value.values()) {
++    const itemResult = matchItemWithSelections(pattern, val);
++    if (!itemResult.matched) {
++      return { matched: false };
++    }
++    mergeSelectionLists(selections, itemResult.selections);
++  }
++
++  ensureSelectionKeys(selectionKeys, selections);
++  return { matched: true, selections };
++};
++
++// ---------------------------------------------------------------------------
++// Map size constraints
++// ---------------------------------------------------------------------------
++
++export const evaluateMapMinSize = (
++  value: unknown,
++  min: number
++): QuantifierResult => {
++  if (!isMapInput(value)) return { matched: false };
++  return { matched: value.size >= min };
++};
++
++export const evaluateMapMaxSize = (
++  value: unknown,
++  max: number
++): QuantifierResult => {
++  if (!isMapInput(value)) return { matched: false };
++  return { matched: value.size <= max };
++};
++
++export const evaluateMapSize = (
++  value: unknown,
++  n: number
++): QuantifierResult => {
++  if (!isMapInput(value)) return { matched: false };
++  return { matched: value.size === n };
++};
++
++export const evaluateMapEmpty = (value: unknown): QuantifierResult => {
++  if (!isMapInput(value)) return { matched: false };
++  return { matched: value.size === 0 };
++};
++
++export const evaluateMapNonEmpty = (value: unknown): QuantifierResult => {
++  if (!isMapInput(value)) return { matched: false };
++  return { matched: value.size > 0 };
++};
++
++// ---------------------------------------------------------------------------
++// Bounds validation
++// ---------------------------------------------------------------------------
++
++export const assertNonNegativeInteger = (
++  methodName: string,
++  value: number
++): void => {
++  if (!Number.isInteger(value) || value < 0) {
++    throw new Error(
++      `\`${methodName}\` expected a non-negative integer, received ${value}`
++    );
++  }
++};
+diff --git a/src/patterns.ts b/src/patterns.ts
+index d80a5e0..3db7448 100644
+--- a/src/patterns.ts
++++ b/src/patterns.ts
+@@ -6,6 +6,28 @@
+  */
+ 
+ import { matchPattern, getSelectionKeys, flatMap } from './internals/helpers';
++import {
++  getPatternSelectionKeys,
++  evaluateSetSome,
++  evaluateSetEvery,
++  evaluateSetNone,
++  evaluateSetMinSize,
++  evaluateSetMaxSize,
++  evaluateSetSize,
++  evaluateSetEmpty,
++  evaluateSetNonEmpty,
++  evaluateMapSomeKey,
++  evaluateMapEveryKey,
++  evaluateMapNoneKey,
++  evaluateMapSomeValue,
++  evaluateMapEveryValue,
++  evaluateMapMinSize,
++  evaluateMapMaxSize,
++  evaluateMapSize,
++  evaluateMapEmpty,
++  evaluateMapNonEmpty,
++  assertNonNegativeInteger,
++} from './internals/map-set-utils';
+ import * as symbols from './internals/symbols';
+ import { matcher } from './internals/symbols';
+ import { isMatching } from './is-matching';
+@@ -40,9 +62,29 @@ import {
+   NumberChainable,
+   StringChainable,
+   ArrayChainable,
++  SetChainable,
++  MapChainable,
+   Variadic,
+   NonNullablePattern,
+   RecordP,
++  SetSomeP,
++  SetEveryP,
++  SetNoneP,
++  SetMinSizeP,
++  SetMaxSizeP,
++  SetSizeP,
++  SetEmptyP,
++  SetNonEmptyP,
++  MapSomeKeyP,
++  MapEveryKeyP,
++  MapNoneKeyP,
++  MapSomeValueP,
++  MapEveryValueP,
++  MapMinSizeP,
++  MapMaxSizeP,
++  MapSizeP,
++  MapEmptyP,
++  MapNonEmptyP,
+ } from './types/Pattern';
+ 
+ export type {
+@@ -174,6 +216,322 @@ function arrayChainable<pattern extends Matcher<any, any, any, any, any>>(
+   }) as any;
+ }
+ 
++function setChainable<pattern extends Matcher<any, any, any, any, any>>(
++  pattern: pattern
++): SetChainable<pattern> {
++  return Object.assign(chainable(pattern), {
++    optional: () => setChainable(optional(pattern) as any),
++    select: (key: any) =>
++      setChainable(
++        (key === undefined ? select(pattern) : select(key, pattern)) as any
++      ),
++    some: (p2: any) =>
++      setChainable(intersection(pattern, setSomeMatcher(p2)) as any),
++    every: (p2: any) =>
++      setChainable(intersection(pattern, setEveryMatcher(p2)) as any),
++    none: (p2: any) =>
++      setChainable(intersection(pattern, setNoneMatcher(p2)) as any),
++    minSize: (min: number) =>
++      setChainable(intersection(pattern, setMinSizeMatcher(min)) as any),
++    maxSize: (max: number) =>
++      setChainable(intersection(pattern, setMaxSizeMatcher(max)) as any),
++    size: (n: number) =>
++      setChainable(intersection(pattern, setSizeMatcher(n)) as any),
++    empty: () =>
++      setChainable(intersection(pattern, setEmptyMatcher()) as any),
++    nonEmpty: () =>
++      setChainable(intersection(pattern, setNonEmptyMatcher()) as any),
++  }) as any;
++}
++
++function mapChainable<pattern extends Matcher<any, any, any, any, any>>(
++  pattern: pattern
++): MapChainable<pattern> {
++  return Object.assign(chainable(pattern), {
++    optional: () => mapChainable(optional(pattern) as any),
++    select: (key: any) =>
++      mapChainable(
++        (key === undefined ? select(pattern) : select(key, pattern)) as any
++      ),
++    someKey: (p2: any) =>
++      mapChainable(intersection(pattern, mapSomeKeyMatcher(p2)) as any),
++    everyKey: (p2: any) =>
++      mapChainable(intersection(pattern, mapEveryKeyMatcher(p2)) as any),
++    noneKey: (p2: any) =>
++      mapChainable(intersection(pattern, mapNoneKeyMatcher(p2)) as any),
++    someValue: (p2: any) =>
++      mapChainable(intersection(pattern, mapSomeValueMatcher(p2)) as any),
++    everyValue: (p2: any) =>
++      mapChainable(intersection(pattern, mapEveryValueMatcher(p2)) as any),
++    minSize: (min: number) =>
++      mapChainable(intersection(pattern, mapMinSizeMatcher(min)) as any),
++    maxSize: (max: number) =>
++      mapChainable(intersection(pattern, mapMaxSizeMatcher(max)) as any),
++    size: (n: number) =>
++      mapChainable(intersection(pattern, mapSizeMatcher(n)) as any),
++    empty: () =>
++      mapChainable(intersection(pattern, mapEmptyMatcher()) as any),
++    nonEmpty: () =>
++      mapChainable(intersection(pattern, mapNonEmptyMatcher()) as any),
++  }) as any;
++}
++
++function setSomeMatcher<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapSet<input>, unknown>>
++>(pattern: pattern): Chainable<SetSomeP<input, pattern>> {
++  const selectionKeys = getPatternSelectionKeys(pattern);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetSome(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'setSome',
++      };
++    },
++  });
++}
++
++function setEveryMatcher<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapSet<input>, unknown>>
++>(pattern: pattern): Chainable<SetEveryP<input, pattern>> {
++  const selectionKeys = getPatternSelectionKeys(pattern);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetEvery(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'setEvery',
++      };
++    },
++  });
++}
++
++function setNoneMatcher<
++  input,
++  const pattern extends Pattern<WithDefault<UnwrapSet<input>, unknown>>
++>(pattern: pattern): Chainable<SetNoneP<input, pattern>> {
++  const selectionKeys = getPatternSelectionKeys(pattern);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetNone(value, pattern, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'setNone',
++      };
++    },
++  });
++}
++
++function setMinSizeMatcher<input, const min extends number>(
++  min: min
++): Chainable<SetMinSizeP<input, min>> {
++  assertNonNegativeInteger('P.set().minSize', min);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetMinSize(value, min),
++        matcherType: 'setMinSize',
++      };
++    },
++  });
++}
++
++function setMaxSizeMatcher<input, const max extends number>(
++  max: max
++): Chainable<SetMaxSizeP<input, max>> {
++  assertNonNegativeInteger('P.set().maxSize', max);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetMaxSize(value, max),
++        matcherType: 'setMaxSize',
++      };
++    },
++  });
++}
++
++function setSizeMatcher<input, const n extends number>(
++  n: n
++): Chainable<SetSizeP<input, n>> {
++  assertNonNegativeInteger('P.set().size', n);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetSize(value, n),
++        matcherType: 'setSize',
++      };
++    },
++  });
++}
++
++function setEmptyMatcher<input>(): Chainable<SetEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetEmpty(value),
++        matcherType: 'setEmpty',
++      };
++    },
++  });
++}
++
++function setNonEmptyMatcher<input>(): Chainable<SetNonEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateSetNonEmpty(value),
++        matcherType: 'setNonEmpty',
++      };
++    },
++  });
++}
++
++function mapSomeKeyMatcher<
++  input,
++  const pk extends Pattern<WithDefault<UnwrapMapKey<input>, unknown>>
++>(pk: pk): Chainable<MapSomeKeyP<input, pk>> {
++  const selectionKeys = getPatternSelectionKeys(pk);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapSomeKey(value, pk, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'mapSomeKey',
++      };
++    },
++  });
++}
++
++function mapEveryKeyMatcher<
++  input,
++  const pk extends Pattern<WithDefault<UnwrapMapKey<input>, unknown>>
++>(pk: pk): Chainable<MapEveryKeyP<input, pk>> {
++  const selectionKeys = getPatternSelectionKeys(pk);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapEveryKey(value, pk, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'mapEveryKey',
++      };
++    },
++  });
++}
++
++function mapNoneKeyMatcher<
++  input,
++  const pk extends Pattern<WithDefault<UnwrapMapKey<input>, unknown>>
++>(pk: pk): Chainable<MapNoneKeyP<input, pk>> {
++  const selectionKeys = getPatternSelectionKeys(pk);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapNoneKey(value, pk, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'mapNoneKey',
++      };
++    },
++  });
++}
++
++function mapSomeValueMatcher<
++  input,
++  const pv extends Pattern<WithDefault<UnwrapMapValue<input>, unknown>>
++>(pv: pv): Chainable<MapSomeValueP<input, pv>> {
++  const selectionKeys = getPatternSelectionKeys(pv);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapSomeValue(value, pv, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'mapSomeValue',
++      };
++    },
++  });
++}
++
++function mapEveryValueMatcher<
++  input,
++  const pv extends Pattern<WithDefault<UnwrapMapValue<input>, unknown>>
++>(pv: pv): Chainable<MapEveryValueP<input, pv>> {
++  const selectionKeys = getPatternSelectionKeys(pv);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapEveryValue(value, pv, selectionKeys),
++        getSelectionKeys: () => selectionKeys,
++        matcherType: 'mapEveryValue',
++      };
++    },
++  });
++}
++
++function mapMinSizeMatcher<input, const min extends number>(
++  min: min
++): Chainable<MapMinSizeP<input, min>> {
++  assertNonNegativeInteger('P.map().minSize', min);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapMinSize(value, min),
++        matcherType: 'mapMinSize',
++      };
++    },
++  });
++}
++
++function mapMaxSizeMatcher<input, const max extends number>(
++  max: max
++): Chainable<MapMaxSizeP<input, max>> {
++  assertNonNegativeInteger('P.map().maxSize', max);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapMaxSize(value, max),
++        matcherType: 'mapMaxSize',
++      };
++    },
++  });
++}
++
++function mapSizeMatcher<input, const n extends number>(
++  n: n
++): Chainable<MapSizeP<input, n>> {
++  assertNonNegativeInteger('P.map().size', n);
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapSize(value, n),
++        matcherType: 'mapSize',
++      };
++    },
++  });
++}
++
++function mapEmptyMatcher<input>(): Chainable<MapEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapEmpty(value),
++        matcherType: 'mapEmpty',
++      };
++    },
++  });
++}
++
++function mapNonEmptyMatcher<input>(): Chainable<MapNonEmptyP<input>> {
++  return chainable({
++    [matcher]() {
++      return {
++        match: (value: any) => evaluateMapNonEmpty(value),
++        matcherType: 'mapNonEmpty',
++      };
++    },
++  });
++}
++
+ /**
+  * `P.optional(subpattern)` takes a sub pattern and returns a pattern which matches if the
+  * key is undefined or if it is defined and the sub pattern matches its value.
+@@ -291,16 +649,16 @@ export function array(
+  *  match(value)
+  *   .with({ users: P.set(P.string) }, () => 'will match Set<string>')
+  */
+-export function set<input>(): Chainable<SetP<input, unknown>>;
++export function set<input>(): SetChainable<SetP<input, unknown>>;
+ export function set<
+   input,
+   const pattern extends Pattern<WithDefault<UnwrapSet<input>, unknown>>
+->(pattern: pattern): Chainable<SetP<input, pattern>>;
++>(pattern: pattern): SetChainable<SetP<input, pattern>>;
+ export function set<
+   input,
+   const pattern extends Pattern<WithDefault<UnwrapSet<input>, unknown>>
+->(...args: [pattern?: pattern]): Chainable<SetP<input, pattern>> {
+-  return chainable({
++>(...args: [pattern?: pattern]): SetChainable<SetP<input, pattern>> {
++  return setChainable({
+     [matcher]() {
+       return {
+         match: <UnknownInput>(value: UnknownInput | input) => {
+@@ -353,20 +711,20 @@ const setEvery = <T>(set: Set<T>, predicate: (value: T) => boolean) => {
+  *  match(value)
+  *   .with({ users: P.map(P.map(P.string, P.number)) }, (map) => `map's type is Map<string, number>`)
+  */
+-export function map<input>(): Chainable<MapP<input, unknown, unknown>>;
++export function map<input>(): MapChainable<MapP<input, unknown, unknown>>;
+ export function map<
+   input,
+   const pkey extends Pattern<WithDefault<UnwrapMapKey<input>, unknown>>,
+   const pvalue extends Pattern<WithDefault<UnwrapMapValue<input>, unknown>>
+->(patternKey: pkey, patternValue: pvalue): Chainable<MapP<input, pkey, pvalue>>;
++>(patternKey: pkey, patternValue: pvalue): MapChainable<MapP<input, pkey, pvalue>>;
+ export function map<
+   input,
+   const pkey extends Pattern<WithDefault<UnwrapMapKey<input>, unknown>>,
+   const pvalue extends Pattern<WithDefault<UnwrapMapValue<input>, unknown>>
+ >(
+   ...args: [patternKey?: pkey, patternValue?: pvalue]
+-): Chainable<MapP<input, pkey, pvalue>> {
+-  return chainable({
++): MapChainable<MapP<input, pkey, pvalue>> {
++  return mapChainable({
+     [matcher]() {
+       return {
+         match: <UnknownInput>(value: UnknownInput | input) => {
+diff --git a/src/types/FindSelected.ts b/src/types/FindSelected.ts
+index cd132e3..1a6a4f9 100644
+--- a/src/types/FindSelected.ts
++++ b/src/types/FindSelected.ts
+@@ -135,6 +135,40 @@ export type FindSelectionUnion<
+       set: i extends Set<infer v>
+         ? MapList<FindSelectionUnion<v, pattern, path>>
+         : never;
++      setSome: i extends Set<infer v>
++        ? MapList<FindSelectionUnion<v, pattern>>
++        : never;
++      setEvery: i extends Set<infer v>
++        ? MapList<FindSelectionUnion<v, pattern>>
++        : never;
++      setNone: i extends Set<infer v>
++        ? MapList<FindSelectionUnion<v, pattern>>
++        : never;
++      setMinSize: never;
++      setMaxSize: never;
++      setSize: never;
++      setEmpty: never;
++      setNonEmpty: never;
++      mapSomeKey: i extends Map<infer k, any>
++        ? MapList<FindSelectionUnion<k, pattern>>
++        : never;
++      mapEveryKey: i extends Map<infer k, any>
++        ? MapList<FindSelectionUnion<k, pattern>>
++        : never;
++      mapNoneKey: i extends Map<infer k, any>
++        ? MapList<FindSelectionUnion<k, pattern>>
++        : never;
++      mapSomeValue: i extends Map<any, infer v>
++        ? MapList<FindSelectionUnion<v, pattern>>
++        : never;
++      mapEveryValue: i extends Map<any, infer v>
++        ? MapList<FindSelectionUnion<v, pattern>>
++        : never;
++      mapMinSize: never;
++      mapMaxSize: never;
++      mapSize: never;
++      mapEmpty: never;
++      mapNonEmpty: never;
+       optional: MapOptional<FindSelectionUnion<i, pattern>>;
+       or: MapOptional<
+         ReduceFindSelectionUnion<i, Extract<pattern, readonly any[]>>
+diff --git a/src/types/InvertPattern.ts b/src/types/InvertPattern.ts
+index bfa961e..588680c 100644
+--- a/src/types/InvertPattern.ts
++++ b/src/types/InvertPattern.ts
+@@ -135,6 +135,24 @@ type InvertPatternInternal<p, input> = 0 extends 1 & p
+       set: Set<
+         InvertPatternInternal<subpattern, SetValue<Extract<input, Set<any>>>>
+       >;
++      setSome: input extends Set<any> ? input : never;
++      setEvery: input extends Set<any> ? input : never;
++      setNone: input extends Set<any> ? input : never;
++      setMinSize: input extends Set<any> ? input : never;
++      setMaxSize: input extends Set<any> ? input : never;
++      setSize: input extends Set<any> ? input : never;
++      setEmpty: input extends Set<any> ? input : never;
++      setNonEmpty: input extends Set<any> ? input : never;
++      mapSomeKey: input extends Map<any, any> ? input : never;
++      mapEveryKey: input extends Map<any, any> ? input : never;
++      mapNoneKey: input extends Map<any, any> ? input : never;
++      mapSomeValue: input extends Map<any, any> ? input : never;
++      mapEveryValue: input extends Map<any, any> ? input : never;
++      mapMinSize: input extends Map<any, any> ? input : never;
++      mapMaxSize: input extends Map<any, any> ? input : never;
++      mapSize: input extends Map<any, any> ? input : never;
++      mapEmpty: input extends Map<any, any> ? input : never;
++      mapNonEmpty: input extends Map<any, any> ? input : never;
+       optional:
+         | InvertPatternInternal<subpattern, Exclude<input, undefined>>
+         | undefined;
+@@ -351,6 +369,24 @@ type InvertPatternForExcludeInternal<p, i, empty = never> =
+         set: i extends Set<infer iv>
+           ? Set<InvertPatternForExcludeInternal<subpattern, iv, empty>>
+           : empty;
++        setSome: i extends Set<any> ? i : empty;
++        setEvery: i extends Set<any> ? i : empty;
++        setNone: i extends Set<any> ? i : empty;
++        setMinSize: i extends Set<any> ? i : empty;
++        setMaxSize: i extends Set<any> ? i : empty;
++        setSize: i extends Set<any> ? i : empty;
++        setEmpty: i extends Set<any> ? i : empty;
++        setNonEmpty: i extends Set<any> ? i : empty;
++        mapSomeKey: i extends Map<any, any> ? i : empty;
++        mapEveryKey: i extends Map<any, any> ? i : empty;
++        mapNoneKey: i extends Map<any, any> ? i : empty;
++        mapSomeValue: i extends Map<any, any> ? i : empty;
++        mapEveryValue: i extends Map<any, any> ? i : empty;
++        mapMinSize: i extends Map<any, any> ? i : empty;
++        mapMaxSize: i extends Map<any, any> ? i : empty;
++        mapSize: i extends Map<any, any> ? i : empty;
++        mapEmpty: i extends Map<any, any> ? i : empty;
++        mapNonEmpty: i extends Map<any, any> ? i : empty;
+         optional:
+           | InvertPatternForExcludeInternal<subpattern, i, empty>
+           | undefined;
+diff --git a/src/types/Pattern.ts b/src/types/Pattern.ts
+index 9145857..24fe10e 100644
+--- a/src/types/Pattern.ts
++++ b/src/types/Pattern.ts
+@@ -15,7 +15,25 @@ export type MatcherType =
+   | 'set'
+   | 'select'
+   | 'default'
+-  | 'custom';
++  | 'custom'
++  | 'setSome'
++  | 'setEvery'
++  | 'setNone'
++  | 'setMinSize'
++  | 'setMaxSize'
++  | 'setSize'
++  | 'setEmpty'
++  | 'setNonEmpty'
++  | 'mapSomeKey'
++  | 'mapEveryKey'
++  | 'mapNoneKey'
++  | 'mapSomeValue'
++  | 'mapEveryValue'
++  | 'mapMinSize'
++  | 'mapMaxSize'
++  | 'mapSize'
++  | 'mapEmpty'
++  | 'mapNonEmpty';
+ 
+ // We use a separate MatcherProtocol type to preserves
+ // the type level information (selections and excluded) used
+@@ -105,6 +123,26 @@ export type MapP<input, pkey, pvalue> = Matcher<input, [pkey, pvalue], 'map'>;
+ 
+ export type SetP<input, p> = Matcher<input, p, 'set'>;
+ 
++export type SetSomeP<input, p> = Matcher<input, p, 'setSome'>;
++export type SetEveryP<input, p> = Matcher<input, p, 'setEvery'>;
++export type SetNoneP<input, p> = Matcher<input, p, 'setNone'>;
++export type SetMinSizeP<input, min extends number> = Matcher<input, min, 'setMinSize'>;
++export type SetMaxSizeP<input, max extends number> = Matcher<input, max, 'setMaxSize'>;
++export type SetSizeP<input, n extends number> = Matcher<input, n, 'setSize'>;
++export type SetEmptyP<input> = Matcher<input, never, 'setEmpty'>;
++export type SetNonEmptyP<input> = Matcher<input, never, 'setNonEmpty'>;
++
++export type MapSomeKeyP<input, pk> = Matcher<input, pk, 'mapSomeKey'>;
++export type MapEveryKeyP<input, pk> = Matcher<input, pk, 'mapEveryKey'>;
++export type MapNoneKeyP<input, pk> = Matcher<input, pk, 'mapNoneKey'>;
++export type MapSomeValueP<input, pv> = Matcher<input, pv, 'mapSomeValue'>;
++export type MapEveryValueP<input, pv> = Matcher<input, pv, 'mapEveryValue'>;
++export type MapMinSizeP<input, min extends number> = Matcher<input, min, 'mapMinSize'>;
++export type MapMaxSizeP<input, max extends number> = Matcher<input, max, 'mapMaxSize'>;
++export type MapSizeP<input, n extends number> = Matcher<input, n, 'mapSize'>;
++export type MapEmptyP<input> = Matcher<input, never, 'mapEmpty'>;
++export type MapNonEmptyP<input> = Matcher<input, never, 'mapNonEmpty'>;
++
+ export type AndP<input, ps> = Matcher<input, ps, 'and'>;
+ 
+ export type OrP<input, ps> = Matcher<input, ps, 'or'>;
+@@ -681,3 +719,109 @@ export type ArrayChainable<
+     },
+     omitted
+   >;
++
++export type SetChainable<
++  pattern,
++  omitted extends string = never
++> = pattern &
++  Omit<
++    {
++      optional<input>(): SetChainable<
++        OptionalP<input, pattern>,
++        omitted | 'optional'
++      >;
++      select<input>(): SetChainable<
++        SelectP<symbols.anonymousSelectKey, input, pattern>,
++        omitted | 'select'
++      >;
++      select<input, k extends string>(
++        key: k
++      ): SetChainable<SelectP<k, input, pattern>, omitted | 'select'>;
++      and<input, const p2 extends Pattern<input>>(
++        pattern: p2
++      ): Chainable<AndP<input, [pattern, p2]>, omitted>;
++      some<input, const p>(
++        subpattern: p
++      ): SetChainable<AndP<input, [pattern, SetSomeP<input, p>]>, omitted>;
++      every<input, const p>(
++        subpattern: p
++      ): SetChainable<AndP<input, [pattern, SetEveryP<input, p>]>, omitted>;
++      none<input, const p>(
++        subpattern: p
++      ): SetChainable<AndP<input, [pattern, SetNoneP<input, p>]>, omitted>;
++      minSize<input, const min extends number>(
++        min: min
++      ): SetChainable<AndP<input, [pattern, SetMinSizeP<input, min>]>, omitted>;
++      maxSize<input, const max extends number>(
++        max: max
++      ): SetChainable<AndP<input, [pattern, SetMaxSizeP<input, max>]>, omitted>;
++      size<input, const n extends number>(
++        n: n
++      ): SetChainable<AndP<input, [pattern, SetSizeP<input, n>]>, omitted>;
++      empty<input>(): SetChainable<
++        AndP<input, [pattern, SetEmptyP<input>]>,
++        omitted
++      >;
++      nonEmpty<input>(): SetChainable<
++        AndP<input, [pattern, SetNonEmptyP<input>]>,
++        omitted
++      >;
++    },
++    omitted
++  >;
++
++export type MapChainable<
++  pattern,
++  omitted extends string = never
++> = pattern &
++  Omit<
++    {
++      optional<input>(): MapChainable<
++        OptionalP<input, pattern>,
++        omitted | 'optional'
++      >;
++      select<input>(): MapChainable<
++        SelectP<symbols.anonymousSelectKey, input, pattern>,
++        omitted | 'select'
++      >;
++      select<input, k extends string>(
++        key: k
++      ): MapChainable<SelectP<k, input, pattern>, omitted | 'select'>;
++      and<input, const p2 extends Pattern<input>>(
++        pattern: p2
++      ): Chainable<AndP<input, [pattern, p2]>, omitted>;
++      someKey<input, const pk>(
++        subpattern: pk
++      ): MapChainable<AndP<input, [pattern, MapSomeKeyP<input, pk>]>, omitted>;
++      everyKey<input, const pk>(
++        subpattern: pk
++      ): MapChainable<AndP<input, [pattern, MapEveryKeyP<input, pk>]>, omitted>;
++      noneKey<input, const pk>(
++        subpattern: pk
++      ): MapChainable<AndP<input, [pattern, MapNoneKeyP<input, pk>]>, omitted>;
++      someValue<input, const pv>(
++        subpattern: pv
++      ): MapChainable<AndP<input, [pattern, MapSomeValueP<input, pv>]>, omitted>;
++      everyValue<input, const pv>(
++        subpattern: pv
++      ): MapChainable<AndP<input, [pattern, MapEveryValueP<input, pv>]>, omitted>;
++      minSize<input, const min extends number>(
++        min: min
++      ): MapChainable<AndP<input, [pattern, MapMinSizeP<input, min>]>, omitted>;
++      maxSize<input, const max extends number>(
++        max: max
++      ): MapChainable<AndP<input, [pattern, MapMaxSizeP<input, max>]>, omitted>;
++      size<input, const n extends number>(
++        n: n
++      ): MapChainable<AndP<input, [pattern, MapSizeP<input, n>]>, omitted>;
++      empty<input>(): MapChainable<
++        AndP<input, [pattern, MapEmptyP<input>]>,
++        omitted
++      >;
++      nonEmpty<input>(): MapChainable<
++        AndP<input, [pattern, MapNonEmptyP<input>]>,
++        omitted
++      >;
++    },
++    omitted
++  >;

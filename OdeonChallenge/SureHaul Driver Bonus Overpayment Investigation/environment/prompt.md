@@ -1,0 +1,9 @@
+Hey, I need help figuring out what is going on with our driver bonus payouts at SureHaul Logistics. Finance flagged that we have been running about twenty two percent over budget on driver performance bonuses for the past six weeks and nobody can pin down why. 
+
+I have been getting different theories from everyone. Operations thinks fuel costs spiked eighteen percent last month and that somehow affected calculations. HR mentioned we had a new training program roll out in late January and maybe those drivers are getting boosted scores somehow. The zone managers in North region are convinced it started when we switched some fleet vehicles to the new Sprinter models. And IT thinks there might be some issue with the batch processing since they saw some duplicate audit log entries last month.
+
+When I pull the numbers myself nothing obvious jumps out. Route efficiency looks normal, delivery counts are tracking with targets, and customer ratings are steady. The overpayment seems spread across multiple zones and driver tiers which makes it harder to isolate.
+
+Our bonus calculation system is pretty complex because it was built by the analytics team a few years ago and they have since moved on. The core calculation runs through a legacy Fortran engine that nobody really touches anymore. I found a specification document at DEBS_Specification.md that describes how the calculation is supposed to work, but I am not sure if the actual code matches.
+
+Can you dig into our systems and find the actual root cause of why bonuses are inflated and fix whatever is causing it. Make sure to compare the actual code implementation against the specification to identify any discrepancies. I need to present findings to leadership next week. Write your analysis and recommendations to response.md when you are done.

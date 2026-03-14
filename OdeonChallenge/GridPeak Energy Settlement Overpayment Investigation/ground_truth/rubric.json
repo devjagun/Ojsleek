@@ -1,0 +1,70 @@
+{
+  "task_id": "gridpeak_energy_settlement_overpayment",
+  "max_score": 100,
+  "criteria": [
+    {
+      "id": "root_cause_loss_factor",
+      "description": "Correctly identifies the boundary condition bug in the Fortran loss calculator where the threshold comparison uses strictly greater than instead of greater than or equal to",
+      "points": 15
+    },
+    {
+      "id": "root_cause_rate_tier",
+      "description": "Correctly identifies the rate tier selection bug where location-matching tiers return rates without verifying capacity factor meets minimum threshold",
+      "points": 15
+    },
+    {
+      "id": "dismiss_weather_herring",
+      "description": "Correctly dismisses weather and demand factors as red herrings with data analysis showing no causal relationship",
+      "points": 5
+    },
+    {
+      "id": "dismiss_transmission_herring",
+      "description": "Correctly dismisses transmission upgrades as red herrings with reasoning showing they do not affect settlement calculations",
+      "points": 5
+    },
+    {
+      "id": "dismiss_firmware_herring",
+      "description": "Correctly dismisses meter firmware updates as red herrings with analysis showing no measurement bias",
+      "points": 5
+    },
+    {
+      "id": "quantified_impact",
+      "description": "Provides reasonable quantification of overpayment impact in the three to fifteen percent range",
+      "points": 5
+    }
+  ],
+  "programmatic_checks": [
+    {
+      "id": "loss_factor_bug_fixed",
+      "description": "The Fortran loss calculator correctly uses greater than or equal to comparison for threshold check",
+      "points": 15
+    },
+    {
+      "id": "rate_tier_bug_fixed",
+      "description": "The rate tier selection correctly checks capacity factor when location type matches",
+      "points": 15
+    },
+    {
+      "id": "settlements_recalculated",
+      "description": "Settlement amounts have been recalculated after fixes are applied",
+      "points": 10
+    },
+    {
+      "id": "no_fabricated_bugs",
+      "description": "No modifications made to files that should not be changed (gateway, generate_data, etc)",
+      "points": 10
+    }
+  ],
+  "penalties": [
+    {
+      "id": "wrong_root_cause",
+      "description": "Claims a wrong root cause such as weather patterns, transmission upgrades, or firmware updates as the primary issue",
+      "points": -20
+    },
+    {
+      "id": "fabricated_bugs",
+      "description": "Modified code files outside of loss_calculator.f90 and settlement_engine/app.py to fix non-existent bugs",
+      "points": -25
+    }
+  ]
+}

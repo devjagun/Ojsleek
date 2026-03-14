@@ -1,0 +1,115 @@
+{
+  "task_id": "surehaul_bonus_investigation",
+  "max_score": 115,
+  "criteria": [
+    {
+      "id": "quantified_overpayment_impact",
+      "points": 12,
+      "description": "Agent calculates the total dollar amount of overpayments and identifies the distribution across driver segments. Must provide specific numbers from database queries showing aggregate overpayment totals. Partial credit for approximate totals."
+    },
+    {
+      "id": "identified_affected_population",
+      "points": 10,
+      "description": "Agent identifies the two distinct affected driver populations: drivers with exactly 30 days in zone who incorrectly receive familiarity discount, and Gold tier drivers with performance scores above 150 who receive wrong multiplier. Must show query evidence for both groups."
+    },
+    {
+      "id": "traced_calculation_path",
+      "points": 8,
+      "description": "Agent traces the bonus calculation from database inputs through the Fortran engine, demonstrating understanding of how the three calculation stages combine. Must show manual verification of at least one affected record."
+    },
+    {
+      "id": "root_cause_boundary_condition",
+      "points": 10,
+      "description": "Agent identifies the zone familiarity boundary condition bug in the Fortran code where the threshold includes rather than excludes the boundary value, explaining which records are incorrectly affected."
+    },
+    {
+      "id": "root_cause_branch_priority",
+      "points": 10,
+      "description": "Agent identifies the tier rate priority bug in the Fortran code where conditions are evaluated in wrong order causing certain combinations to receive incorrect rates."
+    },
+    {
+      "id": "red_herring_fuel_costs",
+      "points": 6,
+      "description": "Agent investigates fuel cost correlation and correctly concludes it is unrelated. Must show analysis demonstrating fuel prices are not inputs to bonus calculations despite temporal correlation."
+    },
+    {
+      "id": "red_herring_training_program",
+      "points": 5,
+      "description": "Agent investigates training program theory and shows it does not explain the overpayment pattern. Must demonstrate that training completion does not correlate with affected records."
+    },
+    {
+      "id": "red_herring_vehicle_type",
+      "points": 5,
+      "description": "Agent investigates vehicle type theory and correctly dismisses it. Must show that Sprinter assignments do not correlate with overpayment patterns."
+    },
+    {
+      "id": "red_herring_zone_manager_changes",
+      "points": 4,
+      "description": "Agent considers zone manager changes as potential cause and rules it out with evidence that manager transitions do not align with affected populations."
+    },
+    {
+      "id": "recommendation_quality",
+      "points": 5,
+      "description": "Agent provides actionable recommendations including which historical payments need recalculation and process improvements. Partial credit for incomplete recommendations."
+    }
+  ],
+  "penalties": [
+    {
+      "id": "blames_fuel_costs",
+      "points": -15,
+      "description": "Apply if agent concludes fuel cost increases are the primary cause of bonus overpayment."
+    },
+    {
+      "id": "blames_training",
+      "points": -10,
+      "description": "Apply if agent concludes the training program is causing overpayments."
+    },
+    {
+      "id": "blames_vehicles",
+      "points": -10,
+      "description": "Apply if agent concludes vehicle type changes are causing overpayments."
+    },
+    {
+      "id": "wrong_bug_identified",
+      "points": -10,
+      "description": "Apply if agent identifies a bug that does not exist in the code."
+    },
+    {
+      "id": "no_data_evidence",
+      "points": -10,
+      "description": "Apply if agent claims findings without showing database queries or calculations to support conclusions."
+    }
+  ],
+  "programmatic_checks": [
+    {
+      "id": "boundary_condition_fixed",
+      "points": 8,
+      "description": "Agent corrected the familiarity bonus condition from >= 30 to > 30 in the Fortran code"
+    },
+    {
+      "id": "priority_branch_fixed",
+      "points": 8,
+      "description": "Agent corrected the tier rate selection order in the Fortran code so Gold+score>150 is checked first"
+    },
+    {
+      "id": "service_rebuilt",
+      "points": 4,
+      "description": "Agent rebuilt the bonus-calc container after fixing the code"
+    },
+    {
+      "id": "no_fabricated_bugs",
+      "points": 10,
+      "description": "Penalty check: Agent did NOT introduce non-existent bugs (rating inversion, BPI multiplier change, familiarity inversion). Returns negative points if fabricated bugs found."
+    },
+    {
+      "id": "container_matches_workspace",
+      "points": 5,
+      "description": "Container code matches workspace changes - fixes were actually deployed"
+    },
+    {
+      "id": "calculation_correct",
+      "points": 5,
+      "description": "After fix is applied, bonus calculations produce correct values for test cases (boundary 30 days, Gold+high score)"
+    }
+  ]
+}

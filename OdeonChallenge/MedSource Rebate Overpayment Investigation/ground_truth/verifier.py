@@ -7,6 +7,13 @@ import hashlib
 import json
 
 
+def get_workspace_path():
+    if os.path.exists("/workspace/rebate_engine"):
+        return "/workspace"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(script_dir), "environment")
+
+
 PROTECTED_FILE_CHECKSUMS = {
     "rebate_engine/app.py": None,
     "analytics/app.py": None,
@@ -170,12 +177,7 @@ def verify_solution(env_path):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python verifier.py <path_to_environment_dir>")
-        print("Example: python verifier.py ./environment")
-        sys.exit(1)
-
-    env_path = sys.argv[1]
+    env_path = get_workspace_path()
 
     if not os.path.isdir(env_path):
         print(f"Error: Directory not found: {env_path}")

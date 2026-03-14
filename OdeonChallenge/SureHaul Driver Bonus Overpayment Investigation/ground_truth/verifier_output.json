@@ -1,0 +1,44 @@
+[
+  {
+    "id": "boundary_condition_fixed",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 20,
+    "detail": "Familiarity condition still uses >= 30"
+  },
+  {
+    "id": "priority_branch_fixed",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 20,
+    "detail": "Tier rate priority order still incorrect"
+  },
+  {
+    "id": "service_rebuilt",
+    "passed": true,
+    "points_achieved": 10,
+    "points_total": 10,
+    "detail": "bonus-calc service is running"
+  },
+  {
+    "id": "calculation_correct",
+    "passed": true,
+    "points_achieved": 15,
+    "points_total": 15,
+    "detail": "Calculations match expected values"
+  },
+  {
+    "id": "queried_bonus_data",
+    "passed": true,
+    "points_achieved": 5,
+    "points_total": 5,
+    "detail": "Bonus data exists and was queryable"
+  },
+  {
+    "id": "identified_affected_records",
+    "passed": false,
+    "points_achieved": 0,
+    "points_total": 5,
+    "detail": "Affected patterns not identified"
+  }
+]

@@ -1,0 +1,770 @@
+diff --git a/test.sh b/test.sh
+new file mode 100755
+index 0000000..c586c25
+--- /dev/null
++++ b/test.sh
+@@ -0,0 +1,13 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++MODE="${1:-new}"
++
++if [ "$MODE" = "base" ]; then
++  npm test -- --runInBand --testPathIgnorePatterns tests/set-map-quantifiers.test.ts
++elif [ "$MODE" = "new" ]; then
++  npm test -- --runInBand tests/set-map-quantifiers.test.ts
++else
++  echo "Usage: $0 [base|new]" >&2
++  exit 1
++fi
+diff --git a/tests/set-map-quantifiers.test.ts b/tests/set-map-quantifiers.test.ts
+new file mode 100644
+index 0000000..c7baf51
+--- /dev/null
++++ b/tests/set-map-quantifiers.test.ts
+@@ -0,0 +1,745 @@
++import { match, P } from '../src';
++import { Equal, Expect } from '../src/types/helpers';
++
++describe('Set and Map quantifier and size chainables', () => {
++  // ---------------------------------------------------------------------------
++  // P.set() quantifiers
++  // ---------------------------------------------------------------------------
++  describe('P.set().some()', () => {
++    it('matches when at least one element matches', () => {
++      const result = match(new Set([1, 'x', 2]))
++        .with(P.set().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match when no element matches', () => {
++      const result = match(new Set([1, 2, 3]))
++        .with(P.set().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match empty sets', () => {
++      const result = match(new Set<unknown>())
++        .with(P.set().some(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match non-Set inputs', () => {
++      const result = match<unknown, string>([1, 2])
++        .with(P.set().some(P.number), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('composes with base element subpattern', () => {
++      const yes = match(new Set([1, 2, 3]))
++        .with(P.set(P.number).some(P.number.gt(2)), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const no = match(new Set([1, 2, '3']))
++        .with(P.set(P.number).some(P.number.gt(2)), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(yes).toBe('hit');
++      expect(no).toBe('miss');
++    });
++
++    it('select() after some() collects values from matching elements only', () => {
++      const result = match(new Set<number | string>(['a', 10, 'b', 20]))
++        .with(P.set().some(P.number.select('n')), (sel) => sel)
++        .otherwise(() => ({ n: [] as unknown[] }));
++
++      expect(result).toStrictEqual({ n: [10, 20] });
++    });
++  });
++
++  describe('P.set().every()', () => {
++    it('matches when every element matches the subpattern', () => {
++      const result = match(new Set([2, 4, 6]))
++        .with(P.set().every(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when one element does not match', () => {
++      const result = match(new Set([2, -3, 6]))
++        .with(P.set().every(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty sets', () => {
++      const result = match(new Set<number>())
++        .with(P.set().every(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-Set inputs', () => {
++      const result = match<unknown, string>([1, 2])
++        .with(P.set().every(P.number), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('collects selections from all elements', () => {
++      const result = match(new Set([10, 20, 30]))
++        .with(P.set().every(P.number.select('n')), (sel) => sel)
++        .otherwise(() => ({ n: [] as number[] }));
++
++      expect(result).toStrictEqual({ n: [10, 20, 30] });
++    });
++  });
++
++  describe('P.set().none()', () => {
++    it('matches when no element matches the subpattern', () => {
++      const result = match(new Set([1, 2, 3]))
++        .with(P.set().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when at least one element matches the subpattern', () => {
++      const result = match(new Set([1, 'x', 3]))
++        .with(P.set().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty sets', () => {
++      const result = match(new Set<unknown>())
++        .with(P.set().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-Set inputs', () => {
++      const result = match<unknown, string>([1, 2])
++        .with(P.set().none(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('returns empty list selections when there are no matches', () => {
++      const result = match(new Set([1, 2, 3]))
++        .with(P.set().none(P.string.select('s')), (sel) => sel)
++        .otherwise(() => ({ s: [] as unknown[] }));
++
++      expect(result).toStrictEqual({ s: [] });
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // P.set() size constraints
++  // ---------------------------------------------------------------------------
++  describe('P.set() size constraints', () => {
++    it('minSize matches sets with enough elements', () => {
++      const hit = match(new Set([1, 2, 3]))
++        .with(P.set().minSize(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1, 2]))
++        .with(P.set().minSize(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('maxSize matches sets up to the limit', () => {
++      const hit = match(new Set([1, 2]))
++        .with(P.set().maxSize(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1, 2, 3]))
++        .with(P.set().maxSize(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('size matches sets with exact count', () => {
++      const hit = match(new Set([1, 2, 3]))
++        .with(P.set().size(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1, 2]))
++        .with(P.set().size(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('empty matches only empty sets', () => {
++      const hit = match(new Set<unknown>())
++        .with(P.set().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1]))
++        .with(P.set().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('nonEmpty matches only non-empty sets', () => {
++      const hit = match(new Set([1]))
++        .with(P.set().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set<unknown>())
++        .with(P.set().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('chains minSize and maxSize together', () => {
++      const hit = match(new Set([1, 2, 3]))
++        .with(P.set().minSize(2).maxSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1]))
++        .with(P.set().minSize(2).maxSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('minSize and maxSize fail on non-Set inputs', () => {
++      const r1 = match<unknown, string>([1, 2])
++        .with(P.set().minSize(1), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const r2 = match<unknown, string>({})
++        .with(P.set().maxSize(5), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(r1).toBe('miss');
++      expect(r2).toBe('miss');
++    });
++
++    it('throws on invalid minSize bound', () => {
++      expect(() => P.set().minSize(-1)).toThrow(
++        '`P.set().minSize` expected a non-negative integer, received -1'
++      );
++      expect(() => P.set().minSize(1.5)).toThrow(
++        '`P.set().minSize` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.set().minSize(Number.NaN)).toThrow(
++        '`P.set().minSize` expected a non-negative integer, received NaN'
++      );
++    });
++
++    it('throws on invalid maxSize and size bounds', () => {
++      expect(() => P.set().maxSize(-1)).toThrow(
++        '`P.set().maxSize` expected a non-negative integer, received -1'
++      );
++      expect(() => P.set().maxSize(Number.NaN)).toThrow(
++        '`P.set().maxSize` expected a non-negative integer, received NaN'
++      );
++      expect(() => P.set().maxSize(1.5)).toThrow(
++        '`P.set().maxSize` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.set().size(-2)).toThrow(
++        '`P.set().size` expected a non-negative integer, received -2'
++      );
++      expect(() => P.set().size(0.5)).toThrow(
++        '`P.set().size` expected a non-negative integer, received 0.5'
++      );
++      expect(() => P.set().size(Number.NaN)).toThrow(
++        '`P.set().size` expected a non-negative integer, received NaN'
++      );
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // P.map() key quantifiers
++  // ---------------------------------------------------------------------------
++  describe('P.map().someKey()', () => {
++    it('matches when at least one key matches', () => {
++      const m = new Map([['foo', 1], ['bar', 2]]);
++      const result = match(m)
++        .with(P.map().someKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match when no key matches', () => {
++      const m = new Map([['baz', 1], ['qux', 2]]);
++      const result = match(m)
++        .with(P.map().someKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match empty maps', () => {
++      const result = match(new Map<string, number>())
++        .with(P.map().someKey(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match non-Map inputs', () => {
++      const result = match<unknown, string>({ a: 1 })
++        .with(P.map().someKey(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('collects selected keys', () => {
++      const m = new Map([['foo', 1], ['bar', 2], ['far', 3]]);
++      const result = match(m)
++        .with(P.map().someKey(P.string.startsWith('f').select('k')), (sel) => sel)
++        .otherwise(() => ({ k: [] as string[] }));
++
++      expect(result.k.sort()).toStrictEqual(['far', 'foo']);
++    });
++  });
++
++  describe('P.map().everyKey()', () => {
++    it('matches when every key matches', () => {
++      const m = new Map([['foo', 1], ['far', 2]]);
++      const result = match(m)
++        .with(P.map().everyKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when one key does not match', () => {
++      const m = new Map([['foo', 1], ['bar', 2]]);
++      const result = match(m)
++        .with(P.map().everyKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty maps', () => {
++      const result = match(new Map<string, number>())
++        .with(P.map().everyKey(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-Map inputs', () => {
++      const result = match<unknown, string>([['a', 1]])
++        .with(P.map().everyKey(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++  });
++
++  describe('P.map().noneKey()', () => {
++    it('matches when no key matches', () => {
++      const m = new Map([['baz', 1], ['qux', 2]]);
++      const result = match(m)
++        .with(P.map().noneKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when at least one key matches', () => {
++      const m = new Map([['foo', 1], ['baz', 2]]);
++      const result = match(m)
++        .with(P.map().noneKey(P.string.startsWith('f')), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty maps', () => {
++      const result = match(new Map<string, number>())
++        .with(P.map().noneKey(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('returns empty selection list when no keys match', () => {
++      const m = new Map([['baz', 1], ['qux', 2]]);
++      const result = match(m)
++        .with(P.map().noneKey(P.string.startsWith('f').select('k')), (sel) => sel)
++        .otherwise(() => ({ k: [] as unknown[] }));
++
++      expect(result).toStrictEqual({ k: [] });
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // P.map() value quantifiers
++  // ---------------------------------------------------------------------------
++  describe('P.map().someValue()', () => {
++    it('matches when at least one value matches', () => {
++      const m = new Map<string, number | string>([['a', 1], ['b', 'hello'], ['c', 3]]);
++      const result = match(m)
++        .with(P.map().someValue(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match when no value matches', () => {
++      const m = new Map([['a', 1], ['b', 2]]);
++      const result = match(m)
++        .with(P.map().someValue(P.string), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('does not match empty maps', () => {
++      const result = match(new Map<string, number>())
++        .with(P.map().someValue(P.number), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('collects selected matching values', () => {
++      const m = new Map<string, number | string>([['a', 1], ['b', 'hello'], ['c', 'world']]);
++      const result = match(m)
++        .with(P.map().someValue(P.string.select('v')), (sel) => sel)
++        .otherwise(() => ({ v: [] as string[] }));
++
++      expect(result.v.sort()).toStrictEqual(['hello', 'world']);
++    });
++  });
++
++  describe('P.map().everyValue()', () => {
++    it('matches when every value matches', () => {
++      const m = new Map([['a', 1], ['b', 2], ['c', 3]]);
++      const result = match(m)
++        .with(P.map().everyValue(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('fails when one value does not match', () => {
++      const m = new Map([['a', 1], ['b', -2], ['c', 3]]);
++      const result = match(m)
++        .with(P.map().everyValue(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++
++    it('matches empty maps', () => {
++      const result = match(new Map<string, number>())
++        .with(P.map().everyValue(P.number.positive()), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('does not match non-Map inputs', () => {
++      const result = match<unknown, string>([1, 2])
++        .with(P.map().everyValue(P.number), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('miss');
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // P.map() size constraints
++  // ---------------------------------------------------------------------------
++  describe('P.map() size constraints', () => {
++    it('minSize matches maps with enough entries', () => {
++      const hit = match(new Map([['a', 1], ['b', 2], ['c', 3]]))
++        .with(P.map().minSize(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map([['a', 1], ['b', 2]]))
++        .with(P.map().minSize(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('maxSize matches maps up to the limit', () => {
++      const hit = match(new Map([['a', 1], ['b', 2]]))
++        .with(P.map().maxSize(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map([['a', 1], ['b', 2], ['c', 3]]))
++        .with(P.map().maxSize(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('size matches maps with exact entry count', () => {
++      const hit = match(new Map([['a', 1], ['b', 2]]))
++        .with(P.map().size(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map([['a', 1]]))
++        .with(P.map().size(2), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('empty matches only empty maps', () => {
++      const hit = match(new Map<string, number>())
++        .with(P.map().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map([['a', 1]]))
++        .with(P.map().empty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('nonEmpty matches only non-empty maps', () => {
++      const hit = match(new Map([['a', 1]]))
++        .with(P.map().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map<string, number>())
++        .with(P.map().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('chains minSize and maxSize together', () => {
++      const hit = match(new Map([['a', 1], ['b', 2], ['c', 3]]))
++        .with(P.map().minSize(2).maxSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Map([['a', 1]]))
++        .with(P.map().minSize(2).maxSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('size constraints fail on non-Map inputs', () => {
++      const r1 = match<unknown, string>([1, 2])
++        .with(P.map().minSize(1), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const r2 = match<unknown, string>(new Set([1]))
++        .with(P.map().nonEmpty(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(r1).toBe('miss');
++      expect(r2).toBe('miss');
++    });
++
++    it('throws on invalid minSize bound', () => {
++      expect(() => P.map().minSize(-1)).toThrow(
++        '`P.map().minSize` expected a non-negative integer, received -1'
++      );
++      expect(() => P.map().minSize(1.5)).toThrow(
++        '`P.map().minSize` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.map().minSize(Number.NaN)).toThrow(
++        '`P.map().minSize` expected a non-negative integer, received NaN'
++      );
++    });
++
++    it('throws on invalid maxSize and size bounds', () => {
++      expect(() => P.map().maxSize(-1)).toThrow(
++        '`P.map().maxSize` expected a non-negative integer, received -1'
++      );
++      expect(() => P.map().maxSize(Number.NaN)).toThrow(
++        '`P.map().maxSize` expected a non-negative integer, received NaN'
++      );
++      expect(() => P.map().maxSize(1.5)).toThrow(
++        '`P.map().maxSize` expected a non-negative integer, received 1.5'
++      );
++      expect(() => P.map().size(-2)).toThrow(
++        '`P.map().size` expected a non-negative integer, received -2'
++      );
++      expect(() => P.map().size(0.5)).toThrow(
++        '`P.map().size` expected a non-negative integer, received 0.5'
++      );
++      expect(() => P.map().size(Number.NaN)).toThrow(
++        '`P.map().size` expected a non-negative integer, received NaN'
++      );
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // Compositions and integration
++  // ---------------------------------------------------------------------------
++  describe('compositions', () => {
++    it('combines set quantifier with element subpattern and size', () => {
++      const hit = match(new Set([1, 2, 3, 4]))
++        .with(P.set(P.number).some(P.number.gt(3)).minSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match(new Set([1, 2, 3]))
++        .with(P.set(P.number).some(P.number.gt(3)).minSize(4), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hit).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++
++    it('combines map key and value quantifiers', () => {
++      const m = new Map([['foo', 10], ['bar', 20]]);
++      const result = match(m)
++        .with(
++          P.map().someKey(P.string.startsWith('f')).everyValue(P.number.positive()),
++          () => 'hit'
++        )
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('map quantifier with size constraint', () => {
++      const m = new Map([['a', 1], ['b', 2], ['c', 3]]);
++      const result = match(m)
++        .with(P.map().everyValue(P.number).minSize(3), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('works inside object pattern matching', () => {
++      const input = {
++        tags: new Set(['admin', 'user', 'editor']),
++        meta: new Map([['created', '2024-01-01'], ['updated', '2024-06-01']]),
++      };
++
++      const result = match(input)
++        .with(
++          {
++            tags: P.set().some(P.string.startsWith('ad')),
++            meta: P.map().minSize(1),
++          },
++          () => 'hit'
++        )
++        .otherwise(() => 'miss');
++
++      expect(result).toBe('hit');
++    });
++
++    it('set with optional() composition', () => {
++      const hitUndefined = match<Set<number> | undefined, string>(undefined)
++        .with(P.set(P.number).nonEmpty().optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const hitSet = match<Set<number> | undefined, string>(new Set([1]))
++        .with(P.set(P.number).nonEmpty().optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      const miss = match<Set<number> | undefined, string>(new Set())
++        .with(P.set(P.number).nonEmpty().optional(), () => 'hit')
++        .otherwise(() => 'miss');
++
++      expect(hitUndefined).toBe('hit');
++      expect(hitSet).toBe('hit');
++      expect(miss).toBe('miss');
++    });
++  });
++
++  // ---------------------------------------------------------------------------
++  // Type behavior
++  // ---------------------------------------------------------------------------
++  describe('type behavior', () => {
++    it('P.set().some() preserves list-shaped named selection element types', () => {
++      const f = (input: Set<number | string>) =>
++        match(input)
++          .with(P.set().some(P.number.select('n')), (sel) => {
++            type t = Expect<Equal<typeof sel, { n: (number | string)[] }>>;
++            return sel.n.length;
++          })
++          .otherwise(() => 0);
++
++      expect(f(new Set([1, 'x', 2]))).toBe(2);
++      expect(f(new Set(['x']))).toBe(0);
++    });
++
++    it('P.set().every() preserves list-shaped named selection element types', () => {
++      const fe = (input: Set<number | string>) =>
++        match(input)
++          .with(P.set().every(P.number.select('n')), (sel) => {
++            type t = Expect<Equal<typeof sel, { n: (number | string)[] }>>;
++            return sel.n;
++          })
++          .otherwise(() => []);
++
++      expect(fe(new Set([1, 2, 3]))).toStrictEqual([1, 2, 3]);
++    });
++
++    it('P.set().none() returns empty list selections for declared selections', () => {
++      const fn = (input: Set<number | string>) =>
++        match(input)
++          .with(P.set().none(P.string.select('s')), (sel) => {
++            type t = Expect<Equal<typeof sel, { s: (number | string)[] }>>;
++            return sel.s;
++          })
++          .otherwise(() => null);
++
++      expect(fn(new Set([1, 2, 3]))).toStrictEqual([]);
++    });
++
++    it('P.map().someKey() preserves list-shaped named selection key types', () => {
++      const f = (input: Map<string | number, unknown>) =>
++        match(input)
++          .with(P.map().someKey(P.string.select('k')), (sel) => {
++            type t = Expect<Equal<typeof sel, { k: (string | number)[] }>>;
++            return sel.k.length;
++          })
++          .otherwise(() => 0);
++
++      const m = new Map<string | number, unknown>([['foo', 1], [42, 2]]);
++      expect(f(m)).toBeGreaterThan(0);
++    });
++
++    it('P.map().someValue() preserves list-shaped named selection value types', () => {
++      const f = (input: Map<string, number | string>) =>
++        match(input)
++          .with(P.map().someValue(P.string.select('v')), (sel) => {
++            type t = Expect<Equal<typeof sel, { v: (number | string)[] }>>;
++            return sel.v.length;
++          })
++          .otherwise(() => 0);
++
++      const m = new Map<string, number | string>([['a', 'hello'], ['b', 2]]);
++      expect(f(m)).toBe(1);
++    });
++  });
++});

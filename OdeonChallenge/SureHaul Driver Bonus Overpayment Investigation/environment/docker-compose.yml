@@ -1,0 +1,68 @@
+networks:
+  surehaul-net:
+    driver: bridge
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    environment:
+      POSTGRES_DB: surehaul
+      POSTGRES_USER: surehaul
+      POSTGRES_PASSWORD: surehaul123
+    volumes:
+      - ./_seed_data/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - surehaul-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surehaul -d surehaul"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://surehaul:surehaul123@postgres:5432/surehaul?sslmode=disable
+    networks:
+      - surehaul-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bonus-calc:
+    build:
+      context: ./bonus_engine
+      dockerfile: Dockerfile
+    container_name: bonus-calc
+    ports:
+      - "9000:9000"
+    environment:
+      DATABASE_URL: postgres://surehaul:surehaul123@postgres:5432/surehaul
+    networks:
+      - surehaul-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics:
+    build:
+      context: ./analytics
+      dockerfile: Dockerfile
+    container_name: analytics
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL: postgres://surehaul:surehaul123@postgres:5432/surehaul
+    networks:
+      - surehaul-net
+    depends_on:
+      postgres:
+        condition: service_healthy

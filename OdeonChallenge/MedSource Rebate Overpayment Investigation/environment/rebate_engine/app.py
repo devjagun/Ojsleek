@@ -22,17 +22,22 @@ def health():
 
 @app.route("/calculate", methods=["POST"])
 def calculate_rebate():
+    """Calculate rebate for a single customer.
+    
+    Required fields: customer_id, total_units, base_revenue, certification_days, specialty_certified, customer_class
+    Ada binary expects: Customer_ID Total_Units Base_Revenue Certification_Days Is_Specialty_Cert Customer_Class
+    Ada returns: Customer_ID Vol_Index Mix_Factor Class_Rate Total_Rebate
+    """
     data = request.json
-    payment_id = data.get("payment_id")
     customer_id = data.get("customer_id")
-    quarterly_units = data.get("quarterly_units")
-    quarterly_target = data.get("quarterly_target")
-    specialty_ratio = data.get("specialty_ratio", 0.0)
+    total_units = data.get("total_units")
+    base_revenue = data.get("base_revenue")
     certification_days = data.get("certification_days", 0)
     specialty_certified = data.get("specialty_certified", False)
-    contract_tier = data.get("contract_tier", 1)
+    customer_class = data.get("customer_class", 1)
     
-    input_line = f"{payment_id} {customer_id} {quarterly_units} {quarterly_target} {specialty_ratio} {certification_days} {1 if specialty_certified else 0} {contract_tier}"
+    # Ada expects 6 fields: Customer_ID Total_Units Base_Revenue Certification_Days Is_Specialty_Cert Customer_Class
+    input_line = f"{customer_id} {total_units} {base_revenue} {certification_days} {1 if specialty_certified else 0} {customer_class}"
     
     try:
         result = subprocess.run(
@@ -46,10 +51,11 @@ def calculate_rebate():
         if result.returncode != 0:
             return jsonify({"error": "Calculation failed", "stderr": result.stderr}), 500
         
+        # Ada returns: Customer_ID Vol_Index Mix_Factor Class_Rate Total_Rebate
         output = result.stdout.strip().split()
         if len(output) >= 5:
             return jsonify({
-                "payment_id": int(output[0]),
+                "customer_id": int(output[0]),
                 "volume_index": float(output[1]),
                 "product_mix_factor": float(output[2]),
                 "customer_class_rate": float(output[3]),
@@ -73,10 +79,10 @@ def batch_calculate():
             rp.payment_id,
             rp.customer_id,
             rp.quarterly_units,
-            rp.quarterly_target,
-            COALESCE(rp.specialty_ratio, 0)::float,
+            COALESCE((SELECT SUM(o.total_amount) FROM orders o 
+                      WHERE o.customer_id = rp.customer_id AND o.quarter = rp.quarter), 0)::float as base_revenue,
             COALESCE(rp.certification_days, 0),
-            c.specialty_certified,
+            CASE WHEN c.specialty_certified THEN 1 ELSE 0 END as is_specialty_cert,
             c.contract_tier
         FROM rebate_payments rp
         JOIN customers c ON rp.customer_id = c.customer_id
@@ -87,9 +93,9 @@ def batch_calculate():
     results = []
     
     for row in payments:
-        payment_id, customer_id, q_units, q_target, spec_ratio, cert_days, spec_cert, tier = row
+        payment_id, customer_id, q_units, base_revenue, cert_days, is_spec_cert, tier = row
         
-        input_line = f"{payment_id} {customer_id} {q_units} {q_target} {spec_ratio} {cert_days} {1 if spec_cert else 0} {tier}"
+        input_line = f"{customer_id} {q_units} {base_revenue} {cert_days} {is_spec_cert} {tier}"
         
         try:
             result = subprocess.run(
@@ -118,7 +124,7 @@ def batch_calculate():
                     """, (
                         payment_id, customer_id,
                         float(output[1]), float(output[2]), float(output[3]), calculated_rebate,
-                        f'{{"units": {q_units}, "target": {q_target}, "spec_ratio": {spec_ratio}, "cert_days": {cert_days}}}'
+                        f'{{"units": {q_units}, "base_revenue": {base_revenue}, "cert_days": {cert_days}}}'
                     ))
                     
                     results.append({

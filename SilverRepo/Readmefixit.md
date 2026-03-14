@@ -1,0 +1,8 @@
+look at Typescriptchallengefour ny reviewer said this i dont want to touch my test.patch trim my readme.md to remove what is causing this addtional test assumption
+
+ Tests cover required behavior [ERROR]:
+   - The core requirement that the @filter decorator “must filter route queryset results using configurable filter fields and lookup types” is not actually validated. For example, TestFilterDecorator.test_filter_decorator_applies_filtering only asserts response.status_code == 200 and never checks that items were filtered by 'quantity__gt=8'.
+   - AND semantics are not behaviorally verified. TestMultipleFiltersAndCombination.test_multiple_filters_combine_with_and and test_range_filter_both_bounds only assert the input type isn’t None; no checks that results satisfy all filter predicates.
+   - Lookup behaviors (exact, iexact, contains, icontains, gt, gte, lt, lte, in, startswith, istartswith, endswith, iendswith, isnull, range) are not validated against actual data. Many tests only assert that get_filter_input_type() returns a type or that certain fields exist.
+   - Default exact match when no suffix is used is not validated on behavior; TestDefaultFiltering.test_default_lookup_is_exact only checks presence of 'name' or 'name__exact' in schema fields, not that filtering via 'name=...' performs an exact match.
+   - Several assertions are effectively no-ops, e.g., TestDefaultFiltering.test_exact_lookup uses 'assert len([r for r in result if r.get("name") == "banana"]) >= 0' (always true); TestMultipleFiltersAndCombination.test_empty_filter_returns_all_items uses 'assert len(list(result)) >= 0' (always true); multiple tests use 'assert result is not None' without validating correctness.
