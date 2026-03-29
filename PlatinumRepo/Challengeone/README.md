@@ -7,33 +7,33 @@ Statistical Overlay Annotations for Chart Plots
 
 Description
 
-G2Plot's Line, Area, and Column charts must support statistical overlay annotations declared in configuration and rendered at chart-render time.
+G2Plot Line, Area, and Column charts support statistical overlay annotations via a `statisticalAnnotations` config array on LineOptions, AreaOptions, and ColumnOptions.
 
-Trend Lines fit a model and draw annotations. Linear fits expose slope, intercept, and a prediction function, producing a single line annotation spanning the full x-range. Polynomial fits expose coefficients in ascending power order plus prediction; exponential fits expose parameters `a` (multiplicative) and `b` (exponent) plus prediction, where the model is `a * exp(b * x)`. Non-linear fits produce segmented line annotations. Polynomial degree defaults to 2 when absent or zero, then is clamped to [1, 6]. Trend lines require at least two points; single point produces no annotation. Linear regression of one point yields slope 0, intercept at that y, constant predict. Exponential fitting excludes non-positive y-values; if none remain, returns finite defaults (a=1, b=0).
+Trend Lines: Linear fits produce one line annotation spanning the full x-range. Polynomial and exponential fits produce segmented line annotations between consecutive data x-values. Degree defaults to 2 when absent or zero, clamped to [1, 6]. Two+ points required; single point yields no annotation. Single-point linear regression: slope 0, intercept at that y, constant predict. Exponential fit excludes non-positive y; if none remain, returns a=1, b=0.
 
-Reference Bands shade a region between computed boundaries. Standard-deviation uses population formula (dividing by N). Mean of empty collection is zero. Percentile uses linear interpolation: rank = (p / 100) * (n - 1), interpolating between nearest sorted values without mutating input. Band x-boundaries use actual first and last data values from the x-field. Region start is upper boundary; end is lower.
+Reference Bands: Region annotation between computed y-boundaries. Stddev uses population formula (N divisor). Mean of empty is zero. Percentile uses linear interpolation: rank = (p / 100) * (n - 1), without mutating input. X-boundaries use first/last data x-values. Region start = upper boundary, end = lower.
 
-Moving Averages draw line segments between consecutive smoothed values. The utility functions accept a flat `number[]` of y-values and return a flat `number[]` of smoothed values—they do not accept or return point objects. For SMA, positions before a full window use cumulative mean; window exceeding data length uses all points; window 1 returns originals. For EMA, factor 0 produces a constant first value; factor 1 reproduces the original series. Fewer than two points produces no annotations. Empty input returns empty.
+Moving Averages: Line segments between consecutive smoothed values. SMA uses cumulative mean before a full window; window > length uses all points; window 1 returns originals. EMA factor 0 = constant first value; factor 1 = originals. Fewer than two points = no annotations. Empty = empty.
 
-Style Resolution: each overlay may carry an optional style. Trend lines and moving averages use only user-supplied style, or an empty indexable object when absent. Reference bands deep-merge theme region defaults with user style (user wins). Theme line-annotation defaults must never bleed into trend lines or moving averages.
+Style: Trend lines and moving averages use only user style, or empty `{}` when absent. Reference bands deep-merge theme `region.style` with user style (user wins). Theme `line.style` never bleeds into trend lines or moving averages.
 
-Grouping: when a series field is present, computations run independently per group, producing separate annotations for each.
+Grouping: With a series field, computations run per group independently.
 
-Integration: the capability must plug into the existing rendering pipeline. The pipeline step must no-op when unconfigured and return its input unchanged. Type definitions must integrate with the existing type hierarchy.
+Integration: Pipeline step no-ops when unconfigured, returns input unchanged. Types integrate with existing hierarchy.
 
-Configuration Property: LineOptions, AreaOptions, and ColumnOptions each expose a `statisticalAnnotations` property accepting an array of overlay descriptors. Each descriptor is one of:
-Trend line: `{ type: 'trendLine', method: 'linear'|'polynomial'|'exponential', degree?: number, style?: Record<string, any> }`
-Reference band: `{ type: 'referenceBand', method: 'stddev'|'percentile', multiplier?: number (default 1), range?: [number, number] (default [25, 75]), style?: Record<string, any> }`
-Moving average: `{ type: 'movingAverage', method: 'simple'|'exponential', window?: number (default 5), smoothingFactor?: number (default 0.3), style?: Record<string, any> }`
+Overlay descriptors:
+`{ type: 'trendLine', method: 'linear'|'polynomial'|'exponential', degree?: number, style?: Record<string, any> }`
+`{ type: 'referenceBand', method: 'stddev'|'percentile', multiplier?: number (default 1), range?: [number, number] (default [25, 75]), style?: Record<string, any> }`
+`{ type: 'movingAverage', method: 'simple'|'exponential', window?: number (default 5), smoothingFactor?: number (default 0.3), style?: Record<string, any> }`
 
-Module Layout:
+Module layout:
 `src/utils/statistics/descriptive` exports: `mean`, `standardDeviation`, `percentile`
 `src/utils/statistics/regression` exports: `linearRegression`, `polynomialRegression`, `exponentialRegression`
 `src/utils/statistics/moving-average` exports: `simpleMovingAverage`, `exponentialMovingAverage`
-`src/utils/statistics` (barrel) re-exports all of the above
-`src/adaptor/statistical-annotations` exports: `computeStatisticalAnnotations` and `statisticalAnnotations`
+`src/utils/statistics` barrel re-exports all above
+`src/adaptor/statistical-annotations` exports: `computeStatisticalAnnotations`, `statisticalAnnotations`
 
-Function Signatures:
+Signatures (all regression takes `[number, number][]` tuples, moving averages take/return flat `number[]`):
 `mean(values: number[]): number`
 `standardDeviation(values: number[], ddof: number = 0): number`
 `percentile(values: number[], p: number): number`
@@ -43,8 +43,6 @@ Function Signatures:
 `simpleMovingAverage(values: number[], window: number): number[]`
 `exponentialMovingAverage(values: number[], smoothingFactor: number): number[]`
 
-All regression functions accept an array of `[x, y]` tuples (type `[number, number][]`), not separate arrays or objects. Moving average functions accept and return flat `number[]` arrays of y-values only.
+`computeStatisticalAnnotations(data: Record<string, any>[], xField: string, yField: string, seriesField: string | undefined, overlays: StatisticalOverlay[], themeAnnotationStyle?: any)` returns `{ type: 'line'|'region', start: [x, y], end: [x, y], style: Record<string, any> }[]`. The themeAnnotationStyle is `chart.getTheme().components.annotation`, with optional `region.style` and `line.style` sub-objects.
 
-`computeStatisticalAnnotations(data: Record<string, any>[], xField: string, yField: string, seriesField: string | undefined, overlays: StatisticalOverlay[], themeAnnotationStyle?: any)` returns an array of annotation configs: `{ type: 'line'|'region', start: [x, y], end: [x, y], style: Record<string, any> }`. The `themeAnnotationStyle` parameter is the annotation component from the theme (i.e. `chart.getTheme().components.annotation`), containing optional `region.style` and `line.style` sub-objects. Only `region.style` is deep-merged into reference band style; `line.style` is never used for trend lines or moving averages.
-
-The adaptor `statisticalAnnotations(params: Params): Params` accepts the pipeline params object, reads `themeAnnotationStyle` from `params.chart.getTheme().components.annotation`, dispatches computed annotations to the chart's annotation controller, and returns params unchanged.
+`statisticalAnnotations(params: Params): Params` reads theme from `params.chart.getTheme().components.annotation`, dispatches annotations to the annotation controller, returns params unchanged.
