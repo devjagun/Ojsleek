@@ -574,6 +574,151 @@ func getSettlementSummaryHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(summaries)
 }
 
+func getSettlementEnergyAnalysisHandler(w http.ResponseWriter, r *http.Request) {
+	query := `
+		SELECT
+			bucket_label,
+			bucket_order,
+			COUNT(*) as settlement_count,
+			ROUND(AVG(s.loss_factor_applied)::numeric, 6) as avg_loss_factor,
+			ROUND(MIN(s.loss_factor_applied)::numeric, 6) as min_loss_factor,
+			ROUND(AVG(s.loss_deduction)::numeric, 2) as avg_loss_deduction,
+			ROUND(SUM(s.loss_deduction)::numeric, 2) as total_loss_deduction,
+			SUM(CASE WHEN s.loss_factor_applied = 1.0 THEN 1 ELSE 0 END) as unity_factor_count,
+			ROUND(AVG(s.net_payment)::numeric, 2) as avg_net_payment,
+			ROUND(SUM(s.net_payment)::numeric, 2) as total_net_payment
+		FROM (
+			SELECT settlements.*,
+				CASE
+					WHEN energy_mwh < 50 THEN '0-50'
+					WHEN energy_mwh < 100 THEN '50-100'
+					WHEN energy_mwh < 125 THEN '100-125'
+					WHEN energy_mwh < 150 THEN '125-150'
+					WHEN energy_mwh < 200 THEN '150-200'
+					WHEN energy_mwh < 300 THEN '200-300'
+					WHEN energy_mwh < 500 THEN '300-500'
+					WHEN energy_mwh < 1000 THEN '500-1000'
+					ELSE '1000+'
+				END as bucket_label,
+				CASE
+					WHEN energy_mwh < 50 THEN 1
+					WHEN energy_mwh < 100 THEN 2
+					WHEN energy_mwh < 125 THEN 3
+					WHEN energy_mwh < 150 THEN 4
+					WHEN energy_mwh < 200 THEN 5
+					WHEN energy_mwh < 300 THEN 6
+					WHEN energy_mwh < 500 THEN 7
+					WHEN energy_mwh < 1000 THEN 8
+					ELSE 9
+				END as bucket_order
+			FROM settlements
+		) s
+		GROUP BY bucket_label, bucket_order
+		ORDER BY bucket_order
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type BucketAnalysis struct {
+		EnergyBucket       string  `json:"energy_bucket"`
+		SettlementCount    int     `json:"settlement_count"`
+		AvgLossFactor      float64 `json:"avg_loss_factor"`
+		MinLossFactor      float64 `json:"min_loss_factor"`
+		AvgLossDeduction   float64 `json:"avg_loss_deduction"`
+		TotalLossDeduction float64 `json:"total_loss_deduction"`
+		UnityFactorCount   int     `json:"unity_factor_count"`
+		AvgNetPayment      float64 `json:"avg_net_payment"`
+		TotalNetPayment    float64 `json:"total_net_payment"`
+	}
+
+	var results []BucketAnalysis
+	for rows.Next() {
+		var b BucketAnalysis
+		var bucketOrder int
+		rows.Scan(&b.EnergyBucket, &bucketOrder, &b.SettlementCount, &b.AvgLossFactor,
+			&b.MinLossFactor, &b.AvgLossDeduction, &b.TotalLossDeduction,
+			&b.UnityFactorCount, &b.AvgNetPayment, &b.TotalNetPayment)
+		results = append(results, b)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func getSettlementDataQualityAnalysisHandler(w http.ResponseWriter, r *http.Request) {
+	query := `
+		WITH generator_quality AS (
+			SELECT
+				generator_id,
+				COUNT(*) FILTER (WHERE quality_flag IS NOT NULL) as flagged_count,
+				COUNT(*) FILTER (WHERE quality_flag = 'DECOMMISSIONED') as decommissioned_count,
+				COUNT(*) as total_readings
+			FROM meter_readings
+			GROUP BY generator_id
+		)
+		SELECT
+			CASE WHEN COALESCE(gq.flagged_count, 0) > 0
+				THEN 'has_flagged_readings'
+				ELSE 'clean_only'
+			END as data_quality_group,
+			n.location_type,
+			COUNT(*) as settlement_count,
+			ROUND(AVG(s.rate_applied)::numeric, 2) as avg_rate_applied,
+			ROUND(AVG(s.loss_factor_applied)::numeric, 6) as avg_loss_factor,
+			SUM(CASE WHEN s.loss_factor_applied = 1.0 THEN 1 ELSE 0 END) as unity_loss_count,
+			ROUND(AVG(s.net_payment)::numeric, 2) as avg_net_payment,
+			ROUND(SUM(s.net_payment)::numeric, 2) as total_net_payment,
+			ROUND(AVG(s.capacity_factor)::numeric, 4) as avg_capacity_factor
+		FROM settlements s
+		JOIN generators g ON s.generator_id = g.id
+		JOIN nodes n ON g.location_id = n.id
+		LEFT JOIN generator_quality gq ON gq.generator_id = s.generator_id
+		GROUP BY
+			CASE WHEN COALESCE(gq.flagged_count, 0) > 0
+				THEN 'has_flagged_readings'
+				ELSE 'clean_only'
+			END,
+			n.location_type
+		ORDER BY data_quality_group, n.location_type
+	`
+
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type QualityAnalysis struct {
+		DataQualityGroup string  `json:"data_quality_group"`
+		LocationType     string  `json:"location_type"`
+		SettlementCount  int     `json:"settlement_count"`
+		AvgRateApplied   float64 `json:"avg_rate_applied"`
+		AvgLossFactor    float64 `json:"avg_loss_factor"`
+		UnityLossCount   int     `json:"unity_loss_count"`
+		AvgNetPayment    float64 `json:"avg_net_payment"`
+		TotalNetPayment  float64 `json:"total_net_payment"`
+		AvgCapacityFactor float64 `json:"avg_capacity_factor"`
+	}
+
+	var results []QualityAnalysis
+	for rows.Next() {
+		var q QualityAnalysis
+		rows.Scan(&q.DataQualityGroup, &q.LocationType, &q.SettlementCount,
+			&q.AvgRateApplied, &q.AvgLossFactor, &q.UnityLossCount,
+			&q.AvgNetPayment, &q.TotalNetPayment, &q.AvgCapacityFactor)
+		results = append(results, q)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
 func main() {
 	initDB()
 
@@ -585,6 +730,8 @@ func main() {
 	r.HandleFunc("/api/nodes", getNodesHandler).Methods("GET")
 	r.HandleFunc("/api/settlements", getSettlementsHandler).Methods("GET")
 	r.HandleFunc("/api/settlements/summary", getSettlementSummaryHandler).Methods("GET")
+	r.HandleFunc("/api/settlements/energy_analysis", getSettlementEnergyAnalysisHandler).Methods("GET")
+	r.HandleFunc("/api/settlements/data_quality_analysis", getSettlementDataQualityAnalysisHandler).Methods("GET")
 	r.HandleFunc("/api/meter_readings", getMeterReadingsHandler).Methods("GET")
 	r.HandleFunc("/api/loss_factors", getLossFactorsHandler).Methods("GET")
 	r.HandleFunc("/api/rate_tiers", getRateTiersHandler).Methods("GET")

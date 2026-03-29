@@ -1,0 +1,559 @@
+diff --git a/src/adaptor/statistical-annotations.ts b/src/adaptor/statistical-annotations.ts
+new file mode 100644
+index 00000000..df4aca8b
+--- /dev/null
++++ b/src/adaptor/statistical-annotations.ts
+@@ -0,0 +1,222 @@
++import { Params } from '../core/adaptor';
++import { mean, standardDeviation, percentile } from '../utils/statistics/descriptive';
++import { linearRegression, polynomialRegression, exponentialRegression } from '../utils/statistics/regression';
++import { simpleMovingAverage, exponentialMovingAverage } from '../utils/statistics/moving-average';
++import type { StatisticalOverlay, TrendLineOverlay, ReferenceBandOverlay, MovingAverageOverlay } from '../types/statistical-annotations';
++
++interface AnnotationConfig {
++  type: 'line' | 'region';
++  start: [any, any];
++  end: [any, any];
++  style: Record<string, any>;
++}
++
++const MIN_POLYNOMIAL_DEGREE = 1;
++const MAX_POLYNOMIAL_DEGREE = 6;
++const DEFAULT_POLYNOMIAL_DEGREE = 2;
++const DEFAULT_STDDEV_MULTIPLIER = 1;
++const DEFAULT_PERCENTILE_RANGE: [number, number] = [25, 75];
++const DEFAULT_SMA_WINDOW = 5;
++const DEFAULT_EMA_SMOOTHING = 0.3;
++const MIN_TREND_POINTS = 2;
++const MIN_MA_POINTS = 2;
++
++function clampDegree(degree: number | undefined): number {
++  const d = degree || DEFAULT_POLYNOMIAL_DEGREE;
++  return Math.max(MIN_POLYNOMIAL_DEGREE, Math.min(MAX_POLYNOMIAL_DEGREE, d));
++}
++
++function resolveOverlayStyle(overlay: StatisticalOverlay): Record<string, any> {
++  return overlay.style || {};
++}
++
++function buildTrendLineAnnotations(
++  points: [number, number][],
++  xValues: any[],
++  overlay: TrendLineOverlay,
++): AnnotationConfig[] {
++  if (points.length < MIN_TREND_POINTS) return [];
++
++  const style = resolveOverlayStyle(overlay);
++
++  if (overlay.method === 'linear') {
++    const reg = linearRegression(points);
++    return [{
++      type: 'line',
++      start: [xValues[0], reg.predict(points[0][0])],
++      end: [xValues[xValues.length - 1], reg.predict(points[points.length - 1][0])],
++      style,
++    }];
++  }
++
++  let predictFn: (x: number) => number;
++  if (overlay.method === 'polynomial') {
++    const degree = clampDegree(overlay.degree);
++    const reg = polynomialRegression(points, degree);
++    predictFn = reg.predict;
++  } else {
++    const reg = exponentialRegression(points);
++    predictFn = reg.predict;
++  }
++
++  const annotations: AnnotationConfig[] = [];
++  for (let i = 0; i < points.length - 1; i++) {
++    annotations.push({
++      type: 'line',
++      start: [xValues[i], predictFn(points[i][0])],
++      end: [xValues[i + 1], predictFn(points[i + 1][0])],
++      style,
++    });
++  }
++  return annotations;
++}
++
++function computeStddevBounds(
++  yValues: number[],
++  multiplier: number,
++): { upper: number; lower: number } {
++  const m = mean(yValues);
++  const sd = standardDeviation(yValues);
++  return { upper: m + multiplier * sd, lower: m - multiplier * sd };
++}
++
++function computePercentileBounds(
++  yValues: number[],
++  range: [number, number],
++): { upper: number; lower: number } {
++  return {
++    lower: percentile(yValues, range[0]),
++    upper: percentile(yValues, range[1]),
++  };
++}
++
++function buildReferenceBandAnnotations(
++  yValues: number[],
++  xValues: any[],
++  overlay: ReferenceBandOverlay,
++  themeAnnotationStyle?: any,
++): AnnotationConfig[] {
++  let bounds: { upper: number; lower: number };
++
++  if (overlay.method === 'stddev') {
++    const multiplier = overlay.multiplier ?? DEFAULT_STDDEV_MULTIPLIER;
++    bounds = computeStddevBounds(yValues, multiplier);
++  } else {
++    const range = overlay.range || DEFAULT_PERCENTILE_RANGE;
++    bounds = computePercentileBounds(yValues, range);
++  }
++
++  const themeRegionStyle = themeAnnotationStyle?.region?.style || {};
++  const userStyle = resolveOverlayStyle(overlay);
++  const mergedStyle = { ...themeRegionStyle, ...userStyle };
++
++  return [{
++    type: 'region',
++    start: [xValues[0], bounds.upper],
++    end: [xValues[xValues.length - 1], bounds.lower],
++    style: mergedStyle,
++  }];
++}
++
++function buildMovingAverageAnnotations(
++  yValues: number[],
++  xValues: any[],
++  overlay: MovingAverageOverlay,
++): AnnotationConfig[] {
++  if (yValues.length < MIN_MA_POINTS) return [];
++
++  const style = resolveOverlayStyle(overlay);
++  let smoothed: number[];
++
++  if (overlay.method === 'simple') {
++    const window = overlay.window ?? DEFAULT_SMA_WINDOW;
++    smoothed = simpleMovingAverage(yValues, window);
++  } else {
++    const factor = overlay.smoothingFactor ?? DEFAULT_EMA_SMOOTHING;
++    smoothed = exponentialMovingAverage(yValues, factor);
++  }
++
++  const annotations: AnnotationConfig[] = [];
++  for (let i = 0; i < smoothed.length - 1; i++) {
++    annotations.push({
++      type: 'line',
++      start: [xValues[i], smoothed[i]],
++      end: [xValues[i + 1], smoothed[i + 1]],
++      style,
++    });
++  }
++  return annotations;
++}
++
++export function computeStatisticalAnnotations(
++  data: Record<string, any>[],
++  xField: string,
++  yField: string,
++  seriesField: string | undefined,
++  overlays: StatisticalOverlay[],
++  themeAnnotationStyle?: any,
++): AnnotationConfig[] {
++  if (!data || data.length === 0) return [];
++
++  const groups: Map<string, Record<string, any>[]> = new Map();
++  if (seriesField) {
++    for (const datum of data) {
++      const key = String(datum[seriesField]);
++      if (!groups.has(key)) groups.set(key, []);
++      groups.get(key)!.push(datum);
++    }
++  } else {
++    groups.set('__all__', data);
++  }
++
++  const allAnnotations: AnnotationConfig[] = [];
++
++  groups.forEach((groupData) => {
++    const xValues = groupData.map(d => d[xField]);
++    const yValues: number[] = groupData.map(d => d[yField]);
++    const points: [number, number][] = groupData.map((d, i) => [i, d[yField]]);
++
++    for (const overlay of overlays) {
++      switch (overlay.type) {
++        case 'trendLine': {
++          const numericPoints: [number, number][] = groupData.map(d => [d[xField], d[yField]]);
++          allAnnotations.push(
++            ...buildTrendLineAnnotations(numericPoints, xValues, overlay)
++          );
++          break;
++        }
++        case 'referenceBand':
++          allAnnotations.push(
++            ...buildReferenceBandAnnotations(yValues, xValues, overlay, themeAnnotationStyle)
++          );
++          break;
++        case 'movingAverage':
++          allAnnotations.push(
++            ...buildMovingAverageAnnotations(yValues, xValues, overlay)
++          );
++          break;
++      }
++    }
++  });
++
++  return allAnnotations;
++}
++
++export function statisticalAnnotations<O extends Record<string, any>>(params: Params<O>): Params<O> {
++  const { chart, options } = params;
++  const { data, xField, yField, seriesField, statisticalAnnotations: overlays } = options as any;
++
++  if (!overlays || overlays.length === 0) return params;
++
++  const themeAnnotationStyle = chart.getTheme()?.components?.annotation || {};
++  const annotations = computeStatisticalAnnotations(data, xField, yField, seriesField, overlays, themeAnnotationStyle);
++
++  const controller = chart.getController('annotation');
++  if (controller) {
++    for (const ann of annotations) {
++      (controller as any).annotation(ann);
++    }
++  }
++
++  return params;
++}
+diff --git a/src/plots/area/adaptor.ts b/src/plots/area/adaptor.ts
+index e65c6cb4..7033347a 100644
+--- a/src/plots/area/adaptor.ts
++++ b/src/plots/area/adaptor.ts
+@@ -12,6 +12,7 @@ import {
+   transformations,
+ } from '../../adaptor/common';
+ import { area, line, point } from '../../adaptor/geometries';
++import { statisticalAnnotations } from '../../adaptor/statistical-annotations';
+ import { Params } from '../../core/adaptor';
+ import { Datum } from '../../types';
+ import { deepAssign, findGeometry, flow, transformLabel } from '../../utils';
+@@ -173,6 +174,7 @@ export function adaptor(params: Params<AreaOptions>) {
+     label,
+     slider,
+     annotation(),
++    statisticalAnnotations,
+     interaction,
+     animation,
+     limitInPlot
+diff --git a/src/plots/area/types.ts b/src/plots/area/types.ts
+index 9d387c27..3ca4b429 100644
+--- a/src/plots/area/types.ts
++++ b/src/plots/area/types.ts
+@@ -6,6 +6,7 @@ import {
+ } from '../../adaptor/geometries';
+ import { Options, StyleAttr } from '../../types';
+ import { Transformations } from '../../types/coordinate';
++import { StatisticalAnnotationsOption } from '../../types/statistical-annotations';
+ 
+ /** 面积图的配置类型定义 */
+ export interface AreaOptions extends Options, Pick<GeometryOptions, 'customInfo'> {
+@@ -64,4 +65,5 @@ export interface AreaOptions extends Options, Pick<GeometryOptions, 'customInfo'
+    * @description 可以对坐标系进行转换，如: reflectX, reflectY, transpose 等
+    */
+   readonly coordinate?: Transformations;
++  readonly statisticalAnnotations?: StatisticalAnnotationsOption;
+ }
+diff --git a/src/plots/column/adaptor.ts b/src/plots/column/adaptor.ts
+index 86f1d3d1..18343db7 100644
+--- a/src/plots/column/adaptor.ts
++++ b/src/plots/column/adaptor.ts
+@@ -17,6 +17,7 @@ import { connectedArea } from '../../adaptor/connected-area';
+ import { conversionTag } from '../../adaptor/conversion-tag';
+ import { interval } from '../../adaptor/geometries';
+ import { pattern } from '../../adaptor/pattern';
++import { statisticalAnnotations } from '../../adaptor/statistical-annotations';
+ import { Params } from '../../core/adaptor';
+ import { Datum } from '../../types';
+ import { adjustYMetaByZero, deepAssign, findGeometry, flow, pick, transformLabel } from '../../utils';
+@@ -308,6 +309,7 @@ export function adaptor(params: Params<ColumnOptions>, isBar = false) {
+     interaction,
+     animation,
+     annotation(),
++    statisticalAnnotations,
+     conversionTag<ColumnOptions>(options.yField, !isBar, !!seriesField), // 有拆分的时候禁用转化率
+     connectedArea<ColumnOptions>(!options.isStack),
+     limitInPlot
+diff --git a/src/plots/column/types.ts b/src/plots/column/types.ts
+index eda8d50e..1efca808 100644
+--- a/src/plots/column/types.ts
++++ b/src/plots/column/types.ts
+@@ -4,6 +4,7 @@ import { OptionWithConversionTag } from '../../adaptor/conversion-tag';
+ import { IntervalGeometryOptions } from '../../adaptor/geometries/interval';
+ import { BrushCfg, Options, StyleAttr } from '../../types';
+ import { Transformations } from '../../types/coordinate';
++import { StatisticalAnnotationsOption } from '../../types/statistical-annotations';
+ 
+ type PartialIntervalGeometryOptions = Pick<IntervalGeometryOptions, 'dodgePadding' | 'intervalPadding'>;
+ 
+@@ -91,4 +92,5 @@ export interface ColumnOptions
+    * @description 可以对坐标系进行转换，如: reflectX, reflectY, transpose 等
+    */
+   readonly coordinate?: Transformations;
++  readonly statisticalAnnotations?: StatisticalAnnotationsOption;
+ }
+diff --git a/src/plots/line/adaptor.ts b/src/plots/line/adaptor.ts
+index 6af93c7d..11aba8d0 100644
+--- a/src/plots/line/adaptor.ts
++++ b/src/plots/line/adaptor.ts
+@@ -12,6 +12,7 @@ import {
+   tooltip,
+ } from '../../adaptor/common';
+ import { area, line, point } from '../../adaptor/geometries';
++import { statisticalAnnotations } from '../../adaptor/statistical-annotations';
+ import { Params } from '../../core/adaptor';
+ import { deepAssign, findGeometry, flow, transformLabel } from '../../utils';
+ import { adjustYMetaByZero } from '../../utils/data';
+@@ -221,6 +222,7 @@ export function adaptor(params: Params<LineOptions>) {
+     interaction,
+     animation,
+     annotation(),
++    statisticalAnnotations,
+     limitInPlot
+   )(params);
+ }
+diff --git a/src/plots/line/types.ts b/src/plots/line/types.ts
+index 290fac84..dc371d4c 100644
+--- a/src/plots/line/types.ts
++++ b/src/plots/line/types.ts
+@@ -5,6 +5,7 @@ import {
+   PointGeometryOptions,
+ } from '../../adaptor/geometries';
+ import { Options, StyleAttr } from '../../types';
++import { StatisticalAnnotationsOption } from '../../types/statistical-annotations';
+ 
+ export interface LineOptions extends Options, Pick<GeometryOptions, 'customInfo'> {
+   /**
+@@ -61,4 +62,5 @@ export interface LineOptions extends Options, Pick<GeometryOptions, 'customInfo'
+    * @description 坐标轴反转配置 'x' | 'y' | ['x', 'y']
+    */
+   readonly reflect?: 'x' | 'y' | ['x', 'y'];
++  readonly statisticalAnnotations?: StatisticalAnnotationsOption;
+ }
+diff --git a/src/types/index.ts b/src/types/index.ts
+index 43a8a70b..3d79b5b2 100644
+--- a/src/types/index.ts
++++ b/src/types/index.ts
+@@ -8,6 +8,7 @@ export * from './locale';
+ export * from './meta';
+ export * from './state';
+ export * from './statistic';
++export * from './statistical-annotations';
+ export * from './tooltip';
+ 
+ /** 去除 readonly 修饰 */
+diff --git a/src/types/statistical-annotations.ts b/src/types/statistical-annotations.ts
+new file mode 100644
+index 00000000..f3dbe3c1
+--- /dev/null
++++ b/src/types/statistical-annotations.ts
+@@ -0,0 +1,26 @@
++export interface TrendLineOverlay {
++  type: 'trendLine';
++  method: 'linear' | 'polynomial' | 'exponential';
++  degree?: number;
++  style?: Record<string, any>;
++}
++
++export interface ReferenceBandOverlay {
++  type: 'referenceBand';
++  method: 'stddev' | 'percentile';
++  multiplier?: number;
++  range?: [number, number];
++  style?: Record<string, any>;
++}
++
++export interface MovingAverageOverlay {
++  type: 'movingAverage';
++  method: 'simple' | 'exponential';
++  window?: number;
++  smoothingFactor?: number;
++  style?: Record<string, any>;
++}
++
++export type StatisticalOverlay = TrendLineOverlay | ReferenceBandOverlay | MovingAverageOverlay;
++
++export type StatisticalAnnotationsOption = StatisticalOverlay[];
+diff --git a/src/utils/statistics/descriptive.ts b/src/utils/statistics/descriptive.ts
+new file mode 100644
+index 00000000..8283025b
+--- /dev/null
++++ b/src/utils/statistics/descriptive.ts
+@@ -0,0 +1,21 @@
++export function mean(values: number[]): number {
++  if (values.length === 0) return 0;
++  return values.reduce((sum, v) => sum + v, 0) / values.length;
++}
++
++export function standardDeviation(values: number[], ddof: number = 0): number {
++  if (values.length === 0) return 0;
++  const m = mean(values);
++  const sumSq = values.reduce((s, v) => s + (v - m) ** 2, 0);
++  return Math.sqrt(sumSq / (values.length - ddof));
++}
++
++export function percentile(values: number[], p: number): number {
++  const sorted = [...values].sort((a, b) => a - b);
++  const rank = (p / 100) * (sorted.length - 1);
++  const lower = Math.floor(rank);
++  const upper = Math.ceil(rank);
++  if (lower === upper) return sorted[lower];
++  const frac = rank - lower;
++  return sorted[lower] + frac * (sorted[upper] - sorted[lower]);
++}
+diff --git a/src/utils/statistics/index.ts b/src/utils/statistics/index.ts
+new file mode 100644
+index 00000000..53028ca1
+--- /dev/null
++++ b/src/utils/statistics/index.ts
+@@ -0,0 +1,3 @@
++export { mean, standardDeviation, percentile } from './descriptive';
++export { linearRegression, polynomialRegression, exponentialRegression } from './regression';
++export { simpleMovingAverage, exponentialMovingAverage } from './moving-average';
+diff --git a/src/utils/statistics/moving-average.ts b/src/utils/statistics/moving-average.ts
+new file mode 100644
+index 00000000..c9cb3a76
+--- /dev/null
++++ b/src/utils/statistics/moving-average.ts
+@@ -0,0 +1,19 @@
++export function simpleMovingAverage(values: number[], window: number): number[] {
++  if (values.length === 0) return [];
++  const result: number[] = [];
++  for (let i = 0; i < values.length; i++) {
++    const start = Math.max(0, i - window + 1);
++    const slice = values.slice(start, i + 1);
++    result.push(slice.reduce((s, v) => s + v, 0) / slice.length);
++  }
++  return result;
++}
++
++export function exponentialMovingAverage(values: number[], smoothingFactor: number): number[] {
++  if (values.length === 0) return [];
++  const result: number[] = [values[0]];
++  for (let i = 1; i < values.length; i++) {
++    result.push(smoothingFactor * values[i] + (1 - smoothingFactor) * result[i - 1]);
++  }
++  return result;
++}
+diff --git a/src/utils/statistics/regression.ts b/src/utils/statistics/regression.ts
+new file mode 100644
+index 00000000..9e75b672
+--- /dev/null
++++ b/src/utils/statistics/regression.ts
+@@ -0,0 +1,106 @@
++export function linearRegression(points: [number, number][]): {
++  slope: number;
++  intercept: number;
++  predict: (x: number) => number;
++} {
++  if (points.length === 1) {
++    const intercept = points[0][1];
++    return { slope: 0, intercept, predict: () => intercept };
++  }
++
++  const n = points.length;
++  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
++  for (const [x, y] of points) {
++    sumX += x;
++    sumY += y;
++    sumXY += x * y;
++    sumXX += x * x;
++  }
++  const denom = n * sumXX - sumX * sumX;
++  const slope = denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
++  const intercept = (sumY - slope * sumX) / n;
++  return { slope, intercept, predict: (x: number) => slope * x + intercept };
++}
++
++export function polynomialRegression(
++  points: [number, number][],
++  degree: number
++): { coefficients: number[]; predict: (x: number) => number } {
++  const n = points.length;
++  const m = degree + 1;
++
++  // Build Vandermonde matrix and y vector
++  const X: number[][] = [];
++  const Y: number[] = [];
++  for (const [x, y] of points) {
++    const row: number[] = [];
++    let val = 1;
++    for (let j = 0; j < m; j++) {
++      row.push(val);
++      val *= x;
++    }
++    X.push(row);
++    Y.push(y);
++  }
++
++  // X^T * X
++  const XtX: number[][] = Array.from({ length: m }, () => Array(m).fill(0));
++  const XtY: number[] = Array(m).fill(0);
++  for (let i = 0; i < n; i++) {
++    for (let j = 0; j < m; j++) {
++      for (let k = 0; k < m; k++) {
++        XtX[j][k] += X[i][j] * X[i][k];
++      }
++      XtY[j] += X[i][j] * Y[i];
++    }
++  }
++
++  // Gaussian elimination with partial pivoting
++  const aug: number[][] = XtX.map((row, i) => [...row, XtY[i]]);
++  for (let col = 0; col < m; col++) {
++    let maxRow = col;
++    for (let row = col + 1; row < m; row++) {
++      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
++    }
++    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
++    const pivot = aug[col][col];
++    if (pivot === 0) continue;
++    for (let j = col; j <= m; j++) aug[col][j] /= pivot;
++    for (let row = 0; row < m; row++) {
++      if (row === col) continue;
++      const factor = aug[row][col];
++      for (let j = col; j <= m; j++) aug[row][j] -= factor * aug[col][j];
++    }
++  }
++
++  const coefficients = aug.map(row => row[m]);
++
++  const predict = (x: number): number => {
++    let result = 0;
++    let xPow = 1;
++    for (const c of coefficients) {
++      result += c * xPow;
++      xPow *= x;
++    }
++    return result;
++  };
++
++  return { coefficients, predict };
++}
++
++export function exponentialRegression(points: [number, number][]): {
++  a: number;
++  b: number;
++  predict: (x: number) => number;
++} {
++  const filtered = points.filter(([, y]) => y > 0);
++  if (filtered.length < 2) {
++    return { a: 1, b: 0, predict: () => 1 };
++  }
++
++  const logPoints: [number, number][] = filtered.map(([x, y]) => [x, Math.log(y)]);
++  const lin = linearRegression(logPoints);
++  const a = Math.exp(lin.intercept);
++  const b = lin.slope;
++  return { a, b, predict: (x: number) => a * Math.exp(b * x) };
++}

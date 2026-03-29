@@ -1,0 +1,1 @@
+<embed src="@/docs/common/annotations/image.zh.md"></embed>

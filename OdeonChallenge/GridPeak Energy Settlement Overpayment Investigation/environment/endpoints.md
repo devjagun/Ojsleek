@@ -43,6 +43,18 @@ Query parameters:
 - period_start: Start date filter
 - period_end: End date filter
 
+### Settlement Energy Analysis
+
+GET /api/settlements/energy_analysis
+
+Returns settlement statistics grouped by energy MWh bucket (25 MWh intervals). Each bucket includes average and minimum loss factors, loss deduction totals, count of settlements with unity loss factor, and net payment aggregates. Useful for identifying anomalies in loss factor application across different energy delivery volumes.
+
+### Settlement Data Quality Analysis
+
+GET /api/settlements/data_quality_analysis
+
+Returns settlement metrics grouped by data quality status and location type. Classifies each generator as either "has_flagged_readings" (any meter readings with non-null quality flags like DECOMMISSIONED, ESTIMATED, INTERPOLATED, etc.) or "clean_only" (all readings have null quality flags). For each group and location type, shows settlement count, average rate applied, average loss factor, count of unity loss factor settlements, average and total net payments, and average capacity factor. Useful for determining whether meter reading data quality flags correlate with settlement anomalies.
+
 ### Meter Readings
 
 GET /api/meter_readings

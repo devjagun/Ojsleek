@@ -1,70 +1,115 @@
 {
   "task_id": "gridpeak_energy_settlement_overpayment",
-  "max_score": 100,
+  "max_score": 142,
   "criteria": [
     {
+      "id": "quantified_overpayment_impact",
+      "points": 15,
+      "description": "Agent quantifies overpayment by querying the settlements table and comparing recorded values against expected values from the system specification. Must show aggregate totals (e.g. SUM of overpaid amounts) and per-segment breakdowns derived from actual database queries or API responses. Partial credit for approximate totals with query evidence."
+    },
+    {
+      "id": "identified_affected_population",
+      "points": 12,
+      "description": "Agent queries settlements joined with generators and nodes to identify generators at industrial locations whose capacity_factor is below 0.75 but rate_applied reflects the premium industrial tier, AND queries settlements to find generators with energy_mwh near 100 MWh whose loss_factor_applied is 1.0 instead of the expected higher value. Must show SQL output or API results for both populations."
+    },
+    {
+      "id": "traced_calculation_path",
+      "points": 10,
+      "description": "Agent traces at least one affected settlement from database inputs (meter readings, generator info, rate tiers, loss factors) through each calculation stage, showing the expected result differs from the recorded settlement value. Must demonstrate manual recalculation using system rules and compare against stored data."
+    },
+    {
       "id": "root_cause_loss_factor",
-      "description": "Correctly identifies the boundary condition bug in the Fortran loss calculator where the threshold comparison uses strictly greater than instead of greater than or equal to",
-      "points": 15
+      "points": 10,
+      "description": "Agent identifies the boundary condition bug in the Fortran loss calculator where the threshold comparison uses strictly greater than instead of greater than or equal to, and connects this to the data anomaly observed in settlements. Must show evidence from both code inspection and data analysis."
     },
     {
       "id": "root_cause_rate_tier",
-      "description": "Correctly identifies the rate tier selection bug where location-matching tiers return rates without verifying capacity factor meets minimum threshold",
-      "points": 15
+      "points": 10,
+      "description": "Agent identifies the rate tier selection bug where location-matching tiers return rates without verifying capacity factor meets minimum threshold, and connects this to recorded rate_applied values in settlements. Must show evidence from both code inspection and data analysis."
     },
     {
-      "id": "dismiss_weather_herring",
-      "description": "Correctly dismisses weather and demand factors as red herrings with data analysis showing no causal relationship",
-      "points": 5
+      "id": "red_herring_weather",
+      "points": 10,
+      "description": "Agent queries weather data and demand factors, then demonstrates through data analysis that weather patterns are not used as inputs to the settlement calculation pipeline. Must show specific query evidence proving: (1) settlement formula inputs do not include weather/demand data by examining settlement_engine/app.py code, (2) overpayment amounts do NOT correlate with temperature/demand by querying both tables and comparing. Simply stating 'weather is not the cause' without SQL evidence scores zero."
     },
     {
-      "id": "dismiss_transmission_herring",
-      "description": "Correctly dismisses transmission upgrades as red herrings with reasoning showing they do not affect settlement calculations",
-      "points": 5
+      "id": "red_herring_transmission",
+      "points": 8,
+      "description": "Agent queries transmission_upgrades table and cross-references upgrade zones/dates with settlement data to show that overpayments occur equally in zones with and without recent upgrades. Must provide SQL query evidence proving no correlation - for example showing overpayment rates by zone compared to upgrade timing. Simply noting transmission is not referenced in code is insufficient without data cross-reference."
     },
     {
-      "id": "dismiss_firmware_herring",
-      "description": "Correctly dismisses meter firmware updates as red herrings with analysis showing no measurement bias",
-      "points": 5
+      "id": "red_herring_firmware",
+      "points": 8,
+      "description": "Agent queries meter_firmware update records and compares energy readings for updated vs non-updated generators to show firmware changes did not introduce measurement bias. Must show data evidence comparing readings before and after firmware updates, or showing that generators without firmware updates exhibit the same overpayment patterns."
     },
     {
-      "id": "quantified_impact",
-      "description": "Provides reasonable quantification of overpayment impact in the three to fifteen percent range",
-      "points": 5
+      "id": "red_herring_rate_adjustments",
+      "points": 5,
+      "description": "Agent queries rate_adjustments and manual_adjustments tables and analyzes whether pending or approved adjustments explain the overpayment pattern. Must show data evidence that rate adjustments are not the cause."
+    },
+    {
+      "id": "red_herring_data_quality",
+      "points": 5,
+      "description": "Agent analyzes meter reading quality flags (including DECOMMISSIONED, ESTIMATED, INTERPOLATED) and demonstrates these do not explain the overpayment pattern. Ideal evidence: query the /api/settlements/data_quality_analysis endpoint to compare settlement metrics for generators with flagged readings vs clean-only readings by location type, showing identical overpayment patterns in both groups. Must correctly conclude that quality flags are informational metadata and do not affect the settlement calculation pipeline. Agents who add DECOMMISSIONED filtering to settlement queries are introducing a fabricated fix."
+    },
+    {
+      "id": "recommendation_quality",
+      "points": 5,
+      "description": "Agent provides actionable recommendations including which historical settlements need recalculation, process improvements, and testing recommendations. Partial credit for incomplete recommendations."
     }
   ],
   "programmatic_checks": [
     {
       "id": "loss_factor_bug_fixed",
       "description": "The Fortran loss calculator correctly uses greater than or equal to comparison for threshold check",
-      "points": 15
+      "points": 10
     },
     {
       "id": "rate_tier_bug_fixed",
       "description": "The rate tier selection correctly checks capacity factor when location type matches",
-      "points": 15
+      "points": 10
     },
     {
       "id": "settlements_recalculated",
-      "description": "Settlement amounts have been recalculated after fixes are applied",
-      "points": 10
+      "description": "Settlement amounts have been recalculated after fixes are applied and reflect corrected behavior",
+      "points": 8
     },
     {
       "id": "no_fabricated_bugs",
-      "description": "No modifications made to files that should not be changed (gateway, generate_data, etc)",
-      "points": 10
+      "description": "Agent did not introduce fabricated bug fixes such as DECOMMISSIONED quality flag filtering, superseded_date filtering, meter aggregation precision changes, or other modifications that do not address the actual two bugs",
+      "points": 8
+    },
+    {
+      "id": "container_matches_workspace",
+      "description": "Container code matches workspace changes - fixes were actually deployed",
+      "points": 3
+    },
+    {
+      "id": "calculation_correct",
+      "description": "After fixes are applied, calculations produce correct values for threshold energy and industrial generators",
+      "points": 5
     }
   ],
   "penalties": [
     {
       "id": "wrong_root_cause",
-      "description": "Claims a wrong root cause such as weather patterns, transmission upgrades, or firmware updates as the primary issue",
-      "points": -20
+      "points": -20,
+      "description": "Claims a wrong root cause such as weather patterns, transmission upgrades, firmware updates, rate adjustments, or data quality as the primary issue causing overpayments."
     },
     {
       "id": "fabricated_bugs",
-      "description": "Modified code files outside of loss_calculator.f90 and settlement_engine/app.py to fix non-existent bugs",
-      "points": -25
+      "points": -15,
+      "description": "Applied fabricated bug fixes that do not address actual bugs. This includes modifications to files outside loss_calculator.f90 and settlement_engine/app.py, AND within-file fabricated fixes such as: adding DECOMMISSIONED quality flag filtering to settlement or meter reading queries, adding superseded_date filtering to rate tier lookups (all current tiers have NULL superseded_date), modifying meter reading aggregation precision, or adding date range filtering that was not part of the actual bugs. Each fabricated fix demonstrates the agent is chasing non-existent problems."
+    },
+    {
+      "id": "incorporates_red_herring",
+      "points": -10,
+      "description": "Agent presents one or more red herrings (weather patterns, transmission upgrades, firmware updates, data quality flags) as a contributing factor, amplifying cause, or timing explanation for the overpayments, instead of correctly dismissing them as unrelated. For example, claiming 'transmission upgrades changed the grid topology triggering the rate tier bug' or 'weather-driven demand spikes exposed the threshold boundary condition' counts as incorporating a red herring. The bugs are pure code logic errors unrelated to any external events or data conditions."
+    },
+    {
+      "id": "no_data_evidence",
+      "points": -15,
+      "description": "Claims findings without showing database queries, API responses, or calculations to support conclusions. Data evidence is essential for all findings."
     }
   ]
 }
