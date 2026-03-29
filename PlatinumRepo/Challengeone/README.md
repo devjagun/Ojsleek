@@ -9,7 +9,7 @@ Description
 
 G2Plot Line, Area, and Column charts support statistical overlay annotations via a `statisticalAnnotations` config array on LineOptions, AreaOptions, and ColumnOptions.
 
-Trend Lines: Linear fits produce one line annotation spanning the full x-range. Polynomial and exponential fits produce segmented line annotations between consecutive data x-values. Degree defaults to 2 when absent or zero, clamped to [1, 6]. Two+ points required; single point yields no annotation. Single-point linear regression: slope 0, intercept at that y, constant predict. Exponential fit excludes non-positive y; if none remain, returns a=1, b=0.
+Trend Lines: Linear fits produce one line annotation spanning the full x-range. Polynomial and exponential fits produce segmented line annotations between consecutive data x-values. Polynomial coefficients are in ascending power order (index 0 = constant term, index 1 = x^1, index 2 = x^2, etc.). Degree defaults to 2 when absent or zero, clamped to [1, 6]. Two+ points required; single point yields no annotation. Single-point linear regression: slope 0, intercept at that y, constant predict. Exponential fit excludes non-positive y; if none remain, returns a=1, b=0.
 
 Reference Bands: Region annotation between computed y-boundaries. Stddev uses population formula (N divisor). Mean of empty is zero. Percentile uses linear interpolation: rank = (p / 100) * (n - 1), without mutating input. X-boundaries use first/last data x-values. Region start = upper boundary, end = lower.
 
