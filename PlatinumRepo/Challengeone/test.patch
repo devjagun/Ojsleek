@@ -139,8 +139,9 @@ index 00000000..519e1d57
 +    it('should handle all non-positive y-values in exponential regression', () => {
 +      const points: [number, number][] = [[0, -5], [1, 0], [2, -3]];
 +      const result = exponentialRegression(points);
-+      expect(Number.isFinite(result.a)).toBe(true);
-+      expect(Number.isFinite(result.b)).toBe(true);
++      expect(result.a).toBe(1);
++      expect(result.b).toBe(0);
++      expect(result.predict(10)).toBe(1);
 +    });
 +
 +    it('should match linear regression when polynomial degree is 1', () => {
