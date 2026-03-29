@@ -760,21 +760,33 @@ describe('statistical overlay annotations', () => {
   });
 
   describe('barrel re-export from statistics index', () => {
-    it('should re-export all descriptive statistics functions', () => {
-      expect(barrelMean).toBe(mean);
-      expect(barrelStdDev).toBe(standardDeviation);
-      expect(barrelPercentile).toBe(percentile);
+    it('should re-export behaviorally equivalent descriptive statistics functions', () => {
+      const data = [2, 4, 4, 4, 5, 5, 7, 9];
+      expect(barrelMean(data)).toBe(mean(data));
+      expect(barrelStdDev(data)).toBe(standardDeviation(data));
+      expect(barrelPercentile(data, 50)).toBe(percentile(data, 50));
     });
 
-    it('should re-export all regression functions', () => {
-      expect(barrelLinReg).toBe(linearRegression);
-      expect(barrelPolyReg).toBe(polynomialRegression);
-      expect(barrelExpReg).toBe(exponentialRegression);
+    it('should re-export behaviorally equivalent regression functions', () => {
+      const pts: [number, number][] = [[0, 1], [1, 3], [2, 5]];
+      const linA = barrelLinReg(pts);
+      const linB = linearRegression(pts);
+      expect(linA.slope).toBeCloseTo(linB.slope, 10);
+      expect(linA.intercept).toBeCloseTo(linB.intercept, 10);
+      const polyA = barrelPolyReg(pts, 2);
+      const polyB = polynomialRegression(pts, 2);
+      expect(polyA.coefficients).toStrictEqual(polyB.coefficients);
+      const expPts: [number, number][] = [[0, 2], [1, 4], [2, 8]];
+      const expA = barrelExpReg(expPts);
+      const expB = exponentialRegression(expPts);
+      expect(expA.a).toBeCloseTo(expB.a, 10);
+      expect(expA.b).toBeCloseTo(expB.b, 10);
     });
 
-    it('should re-export all moving average functions', () => {
-      expect(barrelSMA).toBe(simpleMovingAverage);
-      expect(barrelEMA).toBe(exponentialMovingAverage);
+    it('should re-export behaviorally equivalent moving average functions', () => {
+      const vals = [1, 2, 3, 4, 5];
+      expect(barrelSMA(vals, 3)).toStrictEqual(simpleMovingAverage(vals, 3));
+      expect(barrelEMA(vals, 0.5)).toStrictEqual(exponentialMovingAverage(vals, 0.5));
     });
   });
 
